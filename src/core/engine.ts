@@ -8,8 +8,10 @@ import { riskyActionRules } from '../rules/risky-action';
 import { MockEventSource } from '../ingestion/mock-source';
 import { FileEventSource } from '../ingestion/file-source';
 import { DEMO_TASK, DEMO_CONSTRAINTS } from '../lib/demo-scenario';
+import type { EventSourceAdapter } from './types';
 
 let initialized = false;
+let currentSource: EventSourceAdapter | null = null;
 
 function initializeRules(): void {
     ruleEngine.registerRules([
@@ -60,7 +62,7 @@ function handleEvent(event: NormalizedEvent): void {
     if (newFlags.some((f) => f.ruleId === 'cd-large-output' || f.ruleId === 'cd-repeated-large')) {
         stats.largeOutputCount++;
     }
-    if (newFlags.some((f) => f.ruleId === 'lp-repeated-tool-target' || f.ruleId === 'lp-error-retry-loop')) {
+    if (newFlags.some((f) => f.ruleId === 'lp-repeated-tool-target' || f.ruleId === 'lp-error-retry-loop' || f.ruleId === 'lp-no-progress')) {
         stats.repeatedActionCount++;
     }
     if (newFlags.some((f) => f.ruleId === 'ra-path-outside-root' || f.ruleId === 'ra-sensitive-destructive')) {
@@ -88,6 +90,7 @@ function initializeSource(): void {
         });
 
         const source = new MockEventSource();
+        currentSource = source;
         source.start(handleEvent);
         console.log('[Watchtower] Demo mode started — emitting events every 1.5s');
     } else if (mode === 'file') {
@@ -98,9 +101,21 @@ function initializeSource(): void {
         }
 
         const source = new FileEventSource(sourceFile);
+        currentSource = source;
         source.start(handleEvent);
         console.log(`[Watchtower] File mode started — tailing ${sourceFile}`);
     }
+}
+
+/** Stop source, clear state and events, then restart the current mode (demo or file). */
+export function resetEngine(): void {
+    if (currentSource) {
+        currentSource.stop();
+        currentSource = null;
+    }
+    stateStore.reset();
+    initializeSource();
+    console.log('[Watchtower] Reset complete — source restarted');
 }
 
 export function getEngine() {
@@ -110,5 +125,5 @@ export function getEngine() {
         initialized = true;
         console.log('[Watchtower] Engine initialized');
     }
-    return { stateStore };
+    return { stateStore, reset: resetEngine };
 }

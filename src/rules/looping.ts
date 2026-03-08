@@ -84,7 +84,39 @@ export const loopingRules: Rule[] = [
         },
     },
 
-    // ─── DEFERRED RULES (TODO) ───
+    {
+        id: 'lp-no-progress',
+        category: 'looping',
+        name: 'No Progress',
+        enabled: true,
+        evaluate(
+            event: NormalizedEvent,
+            state: SupervisorState,
+            _recentEvents: NormalizedEvent[]
+        ): RedFlag | null {
+            const lastProgressSeq =
+                state.progressMarkers.length > 0
+                    ? Math.max(...state.progressMarkers.map((p) => p.sequence))
+                    : 0;
+            const eventsSinceProgress = event.sequence - lastProgressSeq;
+            if (eventsSinceProgress < 20) return null;
+
+            return {
+                id: crypto.randomUUID(),
+                category: 'looping',
+                ruleId: 'lp-no-progress',
+                severity: 'high',
+                title: 'No Progress',
+                reason: `No progress marker in the last ${eventsSinceProgress} events — the agent may be stalled.`,
+                suggestedAction:
+                    'Check if the agent is stuck. Consider redirecting or asking for a status update.',
+                triggeredAt: event.timestamp,
+                relatedEventId: event.id,
+            };
+        },
+    },
+
+    // ─── DEFERRED (TODO) ───
     // {
     //   id: 'lp-similar-actions',
     //   category: 'looping',
@@ -92,13 +124,5 @@ export const loopingRules: Rule[] = [
     //   enabled: false,
     //   evaluate() { return null; },
     //   // Jaccard similarity on action params within sliding window
-    // },
-    // {
-    //   id: 'lp-no-progress',
-    //   category: 'looping',
-    //   name: 'No Progress',
-    //   enabled: false,
-    //   evaluate() { return null; },
-    //   // No progress marker in 20+ events
     // },
 ];

@@ -28,7 +28,7 @@ Total demo time: ~60 seconds.
 
 | Category | Rule | Severity |
 |---|---|---|
-| Context Danger | Single output > 5KB | Medium |
+| Context Danger | Single output > 16KB | Medium |
 | Context Danger | 3+ large outputs in 10-event window | High |
 | Looping | Same tool+target called 3+ times | Medium → High |
 | Looping | Same error repeated with retries | Critical |
@@ -45,13 +45,26 @@ Total demo time: ~60 seconds.
 
 See [DESIGN.md](./DESIGN.md) for full architecture documentation.
 
+## Testing with Live OpenClaw
+
+To monitor a **real** OpenClaw session:
+
+1. Install OpenClaw: `npm install -g openclaw@latest` (Node 22+).
+2. Set `.env.local`: `WATCHTOWER_MODE=file`, `WATCHTOWER_SOURCE_FILE` to your session transcript path, `WATCHTOWER_PROJECT_ROOT` to your project root.
+3. Default transcript path: `~/.openclaw/agents/main/sessions/main.jsonl`.
+4. Run Watchtower (`npm run dev`), then start an OpenClaw task; the dashboard updates live.
+
+**Full steps:** See [OPENCLAW_LIVE_SETUP.md](./OPENCLAW_LIVE_SETUP.md).
+
+**Latest session path:** `./scripts/latest-openclaw-session.sh` prints the most recently modified transcript (e.g. `export WATCHTOWER_SOURCE_FILE=$(./scripts/latest-openclaw-session.sh)`).
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `WATCHTOWER_MODE` | `demo` | `demo` or `file` |
 | `WATCHTOWER_PROJECT_ROOT` | `/Users/example/project` | Used for risky action path checks |
-| `WATCHTOWER_SOURCE_FILE` | — | Path to JSONL log file (when mode=file) |
+| `WATCHTOWER_SOURCE_FILE` | — | Path to JSONL session transcript (when mode=file) |
 
 ## Project Structure
 

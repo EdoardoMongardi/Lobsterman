@@ -69,15 +69,43 @@ export const contextDangerRules: Rule[] = [
         },
     },
 
-    // ─── DEFERRED RULES (TODO) ───
-    // {
-    //   id: 'cd-long-run-no-summary',
-    //   category: 'context_danger',
-    //   name: 'Long Run Without Summary',
-    //   enabled: false,
-    //   evaluate() { return null; },
-    //   // 50+ events without a state summary or compression step
-    // },
+    {
+        id: 'cd-long-run-no-summary',
+        category: 'context_danger',
+        name: 'Long Run Without Summary',
+        enabled: true,
+        evaluate(
+            event: NormalizedEvent,
+            state: SupervisorState,
+            recentEvents: NormalizedEvent[]
+        ): RedFlag | null {
+            const total = state.stats.totalEvents;
+            if (total < 50) return null;
+
+            // Heuristic: no progress marker in the last 25 events → context may be bloated without consolidation
+            const lastProgressSeq =
+                state.progressMarkers.length > 0
+                    ? Math.max(...state.progressMarkers.map((p) => p.sequence))
+                    : 0;
+            const eventsSinceProgress = event.sequence - lastProgressSeq;
+            if (eventsSinceProgress < 25) return null;
+
+            return {
+                id: crypto.randomUUID(),
+                category: 'context_danger',
+                ruleId: 'cd-long-run-no-summary',
+                severity: 'medium',
+                title: 'Long Run Without Summary',
+                reason: `${eventsSinceProgress} events since last progress marker (${total} total) — context may be filling without consolidation.`,
+                suggestedAction:
+                    'Consider asking the agent to summarize current state or compact context.',
+                triggeredAt: event.timestamp,
+                relatedEventId: event.id,
+            };
+        },
+    },
+
+    // ─── DEFERRED (TODO) ───
     // {
     //   id: 'cd-task-drift',
     //   category: 'context_danger',

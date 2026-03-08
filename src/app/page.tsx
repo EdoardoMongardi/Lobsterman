@@ -1,19 +1,42 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { SupervisorState, NormalizedEvent, DashboardResponse, EventsResponse, WatchtowerMode } from '@/core/types';
+import { SupervisorState, NormalizedEvent, DashboardResponse, EventsResponse, WatchtowerMode, RiskLevel } from '@/core/types';
+import { riskLevelToNumber } from '@/lib/utils';
 import { Dashboard } from '@/components/Dashboard';
+
+function notifyRiskEscalation(level: RiskLevel, topReason?: string): void {
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  if (Notification.permission === 'denied') return;
+
+  const requestAndNotify = async () => {
+    if (Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+    if (Notification.permission !== 'granted') return;
+
+    const title = `Watchtower — Risk: ${level.toUpperCase()}`;
+    const body = topReason
+      ? topReason.slice(0, 100) + (topReason.length > 100 ? '…' : '')
+      : 'Check the dashboard for details.';
+    new Notification(title, { body });
+  };
+
+  requestAndNotify();
+}
 
 export default function Home() {
   const [state, setState] = useState<SupervisorState | null>(null);
   const [events, setEvents] = useState<NormalizedEvent[]>([]);
   const [updatedAt, setUpdatedAt] = useState(0);
   const [mode, setMode] = useState<WatchtowerMode>('demo');
-  const [startTime] = useState(Date.now());
+  const [startTime, setStartTime] = useState(Date.now());
   const [elapsed, setElapsed] = useState(0);
+  const [resetting, setResetting] = useState(false);
 
   // Use a ref to track the last sequence so the polling callback never goes stale
   const lastSequenceRef = useRef(0);
+  const previousRiskRef = useRef<RiskLevel>('low');
 
   const poll = useCallback(async () => {
     try {
@@ -50,6 +73,20 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [poll]);
 
+  // Browser notification on risk escalation
+  useEffect(() => {
+    if (!state || state.stats.totalEvents === 0) return;
+    const current = state.riskLevel;
+    const prev = previousRiskRef.current;
+    if (riskLevelToNumber(current) > riskLevelToNumber(prev)) {
+      const topFlag = state.activeRedFlags[0];
+      notifyRiskEscalation(current, topFlag?.reason);
+      previousRiskRef.current = current;
+    } else if (current !== prev) {
+      previousRiskRef.current = current;
+    }
+  }, [state]);
+
   // Elapsed timer
   useEffect(() => {
     const timer = setInterval(() => {
@@ -63,6 +100,25 @@ export default function Home() {
     const s = seconds % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  const handleReset = useCallback(async () => {
+    if (resetting) return;
+    setResetting(true);
+    try {
+      const res = await fetch('/api/reset', { method: 'POST' });
+      if (res.ok) {
+        lastSequenceRef.current = 0;
+        setEvents([]);
+        setState(null);
+        setStartTime(Date.now());
+        setElapsed(0);
+        previousRiskRef.current = 'low';
+        await poll();
+      }
+    } finally {
+      setResetting(false);
+    }
+  }, [resetting, poll]);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#0a0a0f] text-gray-300">
@@ -93,6 +149,14 @@ export default function Home() {
               }`}
             />
           )}
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={resetting}
+            className="text-xs px-3 py-1.5 rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {resetting ? 'Resetting…' : 'Reset'}
+          </button>
         </div>
       </header>
 
