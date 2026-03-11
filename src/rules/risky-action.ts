@@ -34,7 +34,9 @@ const DESTRUCTIVE_COMMAND_PATTERNS = [
     /move[\s\S]*to\s+trash/i,
 ];
 
-const PROJECT_ROOT = process.env.LOBSTERMAN_PROJECT_ROOT ?? '/Users/example/project';
+function getProjectRoot(): string {
+    return process.env.LOBSTERMAN_PROJECT_ROOT ?? '/Users/example/project';
+}
 
 export const riskyActionRules: Rule[] = [
     {
@@ -47,6 +49,7 @@ export const riskyActionRules: Rule[] = [
             _state: SupervisorState,
             _recentEvents: NormalizedEvent[]
         ): RedFlag | null {
+            const PROJECT_ROOT = getProjectRoot();
             if (!PROJECT_ROOT) return null; // Rule disabled if no root set
 
             let resolvedPath: string | null = null;

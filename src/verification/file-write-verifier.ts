@@ -9,7 +9,9 @@
 import * as fs from 'fs';
 import { VerificationResult, VerificationType } from './types';
 
-const PROJECT_ROOT = process.env.LOBSTERMAN_PROJECT_ROOT ?? '';
+function getProjectRoot(): string {
+    return process.env.LOBSTERMAN_PROJECT_ROOT ?? '';
+}
 
 export function verifyFileWrite(targetPath: string, pendingId: string): VerificationResult {
     const id = `vr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -22,7 +24,7 @@ export function verifyFileWrite(targetPath: string, pendingId: string): Verifica
     };
 
     // Safety: only verify inside project root
-    if (!targetPath.startsWith(PROJECT_ROOT) || !PROJECT_ROOT) {
+    if (!targetPath.startsWith(getProjectRoot()) || !getProjectRoot()) {
         return { ...base, status: 'unverifiable', detail: `Path outside project root: ${targetPath}` };
     }
 

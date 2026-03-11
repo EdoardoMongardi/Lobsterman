@@ -35,12 +35,15 @@ const DELETE_TOOL_NAMES = new Set([
 ]);
 
 const EXEC_TOOLS = new Set(['exec', 'Bash', 'bash', 'run_command', 'Shell']);
-const PROJECT_ROOT = process.env.LOBSTERMAN_PROJECT_ROOT ?? '';
+function getProjectRoot(): string {
+    return process.env.LOBSTERMAN_PROJECT_ROOT ?? '';
+}
 
 // ─── Detection ───
 
 function isInsideProjectRoot(path: string): boolean {
-    return PROJECT_ROOT !== '' && path.startsWith(PROJECT_ROOT);
+    const root = getProjectRoot();
+    return root !== '' && path.startsWith(root);
 }
 
 function detectVerificationType(event: NormalizedEvent): { type: VerificationType; path: string } | null {

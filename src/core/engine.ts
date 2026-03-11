@@ -37,7 +37,7 @@ function alertKey(ruleId: string, target?: string): string {
     return `${ruleId}::${target ?? '_'}`;
 }
 
-function shouldAlert(ruleId: string, target?: string): { send: boolean; repeatCount: number } {
+export function shouldAlert(ruleId: string, target?: string): { send: boolean; repeatCount: number } {
     const key = alertKey(ruleId, target);
     const entry = alertHistory.get(key);
     const now = Date.now();
@@ -54,7 +54,7 @@ function shouldAlert(ruleId: string, target?: string): { send: boolean; repeatCo
     return { send: false, repeatCount: 0 };
 }
 
-function clearAlertHistory(): void {
+export function clearAlertHistory(): void {
     alertHistory.clear();
 }
 
@@ -65,7 +65,7 @@ const SEVERITY_ORDER: Record<string, number> = {
     critical: 4, high: 3, medium: 2, low: 1, info: 0,
 };
 
-function composeFlags(flags: RedFlag[]): RedFlag {
+export function composeFlags(flags: RedFlag[]): RedFlag {
     if (flags.length === 1) return flags[0];
 
     // Sort by severity (highest first)
