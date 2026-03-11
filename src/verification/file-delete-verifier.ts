@@ -20,6 +20,11 @@ export function verifyFileDelete(targetPath: string, pendingId: string): Verific
         timestamp: Date.now(),
     };
 
+    // Safety: only verify inside project root
+    if (!targetPath.startsWith(PROJECT_ROOT) || !PROJECT_ROOT) {
+        return { ...base, status: 'unverifiable', detail: `Path outside project root: ${targetPath}` };
+    }
+
     try {
         if (fs.existsSync(targetPath)) {
             // File still exists → mismatch

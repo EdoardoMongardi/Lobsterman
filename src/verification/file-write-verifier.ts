@@ -21,6 +21,11 @@ export function verifyFileWrite(targetPath: string, pendingId: string): Verifica
         timestamp: Date.now(),
     };
 
+    // Safety: only verify inside project root
+    if (!targetPath.startsWith(PROJECT_ROOT) || !PROJECT_ROOT) {
+        return { ...base, status: 'unverifiable', detail: `Path outside project root: ${targetPath}` };
+    }
+
     try {
         if (!fs.existsSync(targetPath)) {
             // File missing → mismatch

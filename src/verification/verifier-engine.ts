@@ -35,36 +35,46 @@ const DELETE_TOOL_NAMES = new Set([
 ]);
 
 const EXEC_TOOLS = new Set(['exec', 'Bash', 'bash', 'run_command', 'Shell']);
+const PROJECT_ROOT = process.env.LOBSTERMAN_PROJECT_ROOT ?? '';
 
 // ─── Detection ───
+
+function isInsideProjectRoot(path: string): boolean {
+    return PROJECT_ROOT !== '' && path.startsWith(PROJECT_ROOT);
+}
 
 function detectVerificationType(event: NormalizedEvent): { type: VerificationType; path: string } | null {
     if (event.type !== 'tool_call') return null;
 
     const toolName = event.tool ?? '';
     const target = event.target ?? '';
+    let detected: { type: VerificationType; path: string } | null = null;
 
     // Direct file tool detection (path is the target directly)
     if (WRITE_TOOL_NAMES.has(toolName) && target.startsWith('/')) {
-        return { type: 'file_write', path: target };
-    }
-
-    if (DELETE_TOOL_NAMES.has(toolName) && target.startsWith('/')) {
-        return { type: 'file_delete', path: target };
-    }
-
-    // Exec command detection — parse command string for file operations
-    if (EXEC_TOOLS.has(toolName) && target) {
+        detected = { type: 'file_write', path: target };
+    } else if (DELETE_TOOL_NAMES.has(toolName) && target.startsWith('/')) {
+        detected = { type: 'file_delete', path: target };
+    } else if (EXEC_TOOLS.has(toolName) && target) {
+        // Exec command detection — parse command string for file operations
         const op = extractFileOpFromCommand(target);
         if (op) {
-            return {
+            detected = {
                 type: op.type === 'write' ? 'file_write' : 'file_delete',
                 path: op.path,
             };
         }
     }
 
-    return null;
+    if (!detected) return null;
+
+    // Phase 8A boundary: only verify inside LOBSTERMAN_PROJECT_ROOT
+    if (!isInsideProjectRoot(detected.path)) {
+        console.log(`[Verifier] verification_skipped_out_of_scope: ${detected.type} for ${detected.path}`);
+        return null;
+    }
+
+    return detected;
 }
 
 // ─── Verifier Engine ───
