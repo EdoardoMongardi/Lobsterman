@@ -1,0 +1,4 @@
+{"type":"user_message","summary":"Write file","rawSnippet":"create a new file"}
+{"type":"tool_call","tool":"write_to_file","target":"TESTDIR/orphan.txt","summary":"Write file","rawSnippet":"creating file"}
+{"type":"assistant_message","summary":"Agent continues talking","rawSnippet":"I have created the file"}
+{"type":"tool_call","tool":"exec","target":"ls TESTDIR","summary":"List files","rawSnippet":"ls directory"}

@@ -1,0 +1,3 @@
+{"type":"user_message","summary":"Delete a file","rawSnippet":"delete old file"}
+{"type":"tool_call","tool":"exec","target":"rm TESTDIR/old-file.txt","summary":"Delete file","rawSnippet":"rm TESTDIR/old-file.txt"}
+{"type":"tool_result","tool":"exec","target":"rm TESTDIR/old-file.txt","summary":"File deleted","rawSnippet":"removed"}

@@ -1,0 +1,3 @@
+{"type":"user_message","summary":"Delete outside","rawSnippet":"delete file outside project"}
+{"type":"tool_call","tool":"exec","target":"rm /Users/someone/Desktop/important.txt","summary":"Delete file outside root","rawSnippet":"rm /Users/someone/Desktop/important.txt"}
+{"type":"tool_result","tool":"exec","target":"rm /Users/someone/Desktop/important.txt","summary":"Deleted","rawSnippet":"removed"}

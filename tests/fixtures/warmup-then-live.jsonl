@@ -1,0 +1,9 @@
+{"type":"user_message","summary":"Old task","rawSnippet":"do something"}
+{"type":"tool_call","tool":"exec","target":"echo hello","summary":"Echo","rawSnippet":"echo hello"}
+{"type":"tool_result","tool":"exec","target":"echo hello","summary":"Done","rawSnippet":"hello"}
+{"type":"tool_call","tool":"exec","target":"rm /Users/other/Desktop/stale.txt","summary":"Delete outside root","rawSnippet":"rm /Users/other/Desktop/stale.txt"}
+{"type":"tool_result","tool":"exec","target":"rm /Users/other/Desktop/stale.txt","summary":"Deleted","rawSnippet":"removed"}
+{"type":"assistant_message","summary":"Done with old task","rawSnippet":"Task complete"}
+{"type":"user_message","summary":"New task","rawSnippet":"write a file in the project"}
+{"type":"tool_call","tool":"write_to_file","target":"TESTDIR/live-file.txt","summary":"Write file","rawSnippet":"creating file"}
+{"type":"tool_result","tool":"write_to_file","target":"TESTDIR/live-file.txt","summary":"Written","rawSnippet":"File written"}
