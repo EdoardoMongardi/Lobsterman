@@ -57,6 +57,46 @@ function clearAlertHistory(): void {
     alertHistory.clear();
 }
 
+// ─── Alert Composition ───
+// When one event triggers multiple rules, compose into a single alert.
+
+const SEVERITY_ORDER: Record<string, number> = {
+    critical: 4, high: 3, medium: 2, low: 1, info: 0,
+};
+
+function composeFlags(flags: RedFlag[]): RedFlag {
+    if (flags.length === 1) return flags[0];
+
+    // Sort by severity (highest first)
+    const sorted = [...flags].sort(
+        (a, b) => (SEVERITY_ORDER[b.severity] ?? 0) - (SEVERITY_ORDER[a.severity] ?? 0)
+    );
+
+    const primary = sorted[0];
+    const qualifiers = sorted.slice(1);
+
+    // Build composed title: "Destructive Command — Outside Project Root"
+    const titleParts = [primary.title];
+    for (const q of qualifiers) {
+        if (!titleParts.includes(q.title)) titleParts.push(q.title);
+    }
+
+    // Build composed reason: primary reason + qualifier context
+    const reasons = sorted.map(f => f.reason).filter(Boolean);
+    const composedReason = reasons.join('\n');
+
+    // Use the most urgent suggested action
+    const suggestedAction = primary.suggestedAction
+        ?? qualifiers.find(q => q.suggestedAction)?.suggestedAction;
+
+    return {
+        ...primary,
+        title: titleParts.join(' — '),
+        reason: composedReason,
+        suggestedAction,
+    };
+}
+
 // ─── Engine Callbacks ───
 const callbacks: EngineCallbacks = {};
 
@@ -114,20 +154,29 @@ function handleEvent(event: NormalizedEvent): void {
     const recommendedAction = computeIntervention(activeRedFlags);
     const previousRiskLevel = currentState.riskLevel;
 
-    // 5. Fire callbacks for new flags (with target-aware aggregation)
-    if (!warmingUp && callbacks.onRuleTriggered) {
+    // 5. Fire callbacks for new flags — COMPOSED per event
+    //    When one event triggers multiple rules (e.g., outside-root + destructive),
+    //    compose into a single alert with highest severity and merged context.
+    if (!warmingUp && callbacks.onRuleTriggered && newFlags.length > 0) {
+        // Collect all alertable flags (pass cooldown)
+        const alertableFlags: RedFlag[] = [];
         for (const flag of newFlags) {
             const { send, repeatCount } = shouldAlert(flag.ruleId, event.target);
             if (send) {
-                console.log(`[Lobsterman] Sending alert: ${flag.ruleId} (target: ${event.target ?? 'none'}, repeat: ${repeatCount})`);
-                // Enrich flag reason with repeat count if suppressed hits occurred
-                const enrichedFlag = repeatCount > 0
+                const enriched = repeatCount > 0
                     ? { ...flag, reason: `${flag.reason} (repeated ${repeatCount + 1}× recently)` }
                     : flag;
-                callbacks.onRuleTriggered(enrichedFlag, event);
+                alertableFlags.push(enriched);
             } else {
-                console.log(`[Lobsterman] Alert suppressed (cooldown): ${flag.ruleId} (target: ${event.target ?? 'none'})`);
+                console.log(`[Lobsterman] Alert suppressed (cooldown): ${flag.ruleId}`);
             }
+        }
+
+        if (alertableFlags.length > 0) {
+            // Compose into one alert
+            const composed = composeFlags(alertableFlags);
+            console.log(`[Lobsterman] Sending composed alert (${alertableFlags.map(f => f.ruleId).join(' + ')})`);
+            callbacks.onRuleTriggered(composed, event);
         }
     } else if (!warmingUp && newFlags.length > 0) {
         console.log(`[Lobsterman] Flags produced but no onRuleTriggered callback registered!`);
