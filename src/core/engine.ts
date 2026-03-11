@@ -116,13 +116,29 @@ function initializeRules(): void {
     ]);
 }
 
+/**
+ * Extract clean task text from OpenClaw user message format.
+ * Raw format: "Sender (untrusted metadata):\n```json\n{...}\n```\n\n[timestamp] actual message"
+ */
+function extractTaskText(raw: string): string {
+    // Try to find the actual message after the metadata JSON block
+    // Look for pattern: ``` followed by blank line then [timestamp] message
+    const afterCodeBlock = raw.match(/```\s*\n\s*\n\s*(?:\[[\s\S]*?\]\s*)?([\s\S]+)/);
+    if (afterCodeBlock) {
+        const msg = afterCodeBlock[1].trim();
+        return msg.length > 120 ? msg.slice(0, 120) + '...' : msg;
+    }
+
+    // Fallback: strip [user_message] prefix if present
+    const stripped = raw.replace(/^\[user_message\]\s*/i, '').trim();
+    return stripped.length > 120 ? stripped.slice(0, 120) + '...' : stripped;
+}
+
 function handleEvent(event: NormalizedEvent): void {
     // Auto-extract task from first user message (used in file mode)
     const preState = stateStore.getState();
     if (!preState.originalTask && event.type === 'user_message' && event.rawSnippet) {
-        const taskText = event.rawSnippet.length >= 200
-            ? event.summary
-            : event.rawSnippet;
+        const taskText = extractTaskText(event.rawSnippet);
         stateStore.updateState({ originalTask: taskText });
 
         // Fire session start callback (only if not warming up)
