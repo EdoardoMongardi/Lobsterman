@@ -31,6 +31,7 @@ function createInitialState(): SupervisorState {
             largeOutputCount: 0,
             riskyActionCount: 0,
         },
+        operatorDecisions: [],
     };
 }
 

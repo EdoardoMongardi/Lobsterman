@@ -1,4 +1,5 @@
 import { NormalizedEvent, RedFlag, RiskLevel, EngineCallbacks } from './types';
+import { resetSequence } from './event-normalizer';
 import { stateStore } from './state-store';
 import { ruleEngine } from './rule-engine';
 import { computeIntervention, computeRiskLevel } from './intervention';
@@ -9,6 +10,7 @@ import { MockEventSource } from '../ingestion/mock-source';
 import { FileEventSource } from '../ingestion/file-source';
 import { findLatestSession, SessionWatcher } from '../ingestion/session-watcher';
 import { initTelegramBot, stopTelegramBot } from '../telegram/telegram-bot';
+import { loadDecisions, clearDecisions } from '../telegram/operator-intent';
 import { DEMO_TASK, DEMO_CONSTRAINTS } from '../lib/demo-scenario';
 import type { EventSourceAdapter } from './types';
 
@@ -17,19 +19,41 @@ let currentSource: EventSourceAdapter | null = null;
 let sessionWatcher: SessionWatcher | null = null;
 let warmingUp = false; // Suppress callbacks during initial file load
 
-// ─── Alert Cooldown ───
-// Prevent flooding: each ruleId can only fire a callback once per COOLDOWN_MS
+// ─── Alert Aggregation ───
+// Target-aware dedup: same ruleId + target within cooldown → aggregate, not spam.
+// Risk-level-change alerts always pass through (handled separately).
 const COOLDOWN_MS = 60_000; // 60 seconds
-const lastAlertTime = new Map<string, number>();
 
-function isOnCooldown(ruleId: string): boolean {
-    const last = lastAlertTime.get(ruleId);
-    if (!last) return false;
-    return Date.now() - last < COOLDOWN_MS;
+interface AlertEntry {
+    lastAlertedAt: number;
+    suppressedCount: number;
 }
 
-function markAlerted(ruleId: string): void {
-    lastAlertTime.set(ruleId, Date.now());
+const alertHistory = new Map<string, AlertEntry>();
+
+function alertKey(ruleId: string, target?: string): string {
+    return `${ruleId}::${target ?? '_'}`;
+}
+
+function shouldAlert(ruleId: string, target?: string): { send: boolean; repeatCount: number } {
+    const key = alertKey(ruleId, target);
+    const entry = alertHistory.get(key);
+    const now = Date.now();
+
+    if (!entry || now - entry.lastAlertedAt >= COOLDOWN_MS) {
+        // Cooldown expired or first time — send alert, report any suppressed count
+        const repeatCount = entry?.suppressedCount ?? 0;
+        alertHistory.set(key, { lastAlertedAt: now, suppressedCount: 0 });
+        return { send: true, repeatCount };
+    }
+
+    // Still in cooldown — suppress and count
+    entry.suppressedCount++;
+    return { send: false, repeatCount: 0 };
+}
+
+function clearAlertHistory(): void {
+    alertHistory.clear();
 }
 
 // ─── Engine Callbacks ───
@@ -72,6 +96,11 @@ function handleEvent(event: NormalizedEvent): void {
     const recentEvents = stateStore.getAllEvents().slice(-25);
     const newFlags = ruleEngine.evaluate(event, stateStore.getState(), recentEvents);
 
+    // Debug: log rule evaluation
+    if (!warmingUp && newFlags.length > 0) {
+        console.log(`[Lobsterman] Rules fired ${newFlags.length} flag(s) for event #${event.sequence}: ${newFlags.map(f => f.ruleId).join(', ')}`);
+    }
+
     // 3. Merge new flags into active flags (deduplicate by ruleId, keep latest)
     const currentState = stateStore.getState();
     const existingFlags = currentState.activeRedFlags.filter(
@@ -84,14 +113,23 @@ function handleEvent(event: NormalizedEvent): void {
     const recommendedAction = computeIntervention(activeRedFlags);
     const previousRiskLevel = currentState.riskLevel;
 
-    // 5. Fire callbacks for new flags (with cooldown to prevent flooding)
+    // 5. Fire callbacks for new flags (with target-aware aggregation)
     if (!warmingUp && callbacks.onRuleTriggered) {
         for (const flag of newFlags) {
-            if (!isOnCooldown(flag.ruleId)) {
-                markAlerted(flag.ruleId);
-                callbacks.onRuleTriggered(flag, event);
+            const { send, repeatCount } = shouldAlert(flag.ruleId, event.target);
+            if (send) {
+                console.log(`[Lobsterman] Sending alert: ${flag.ruleId} (target: ${event.target ?? 'none'}, repeat: ${repeatCount})`);
+                // Enrich flag reason with repeat count if suppressed hits occurred
+                const enrichedFlag = repeatCount > 0
+                    ? { ...flag, reason: `${flag.reason} (repeated ${repeatCount + 1}× recently)` }
+                    : flag;
+                callbacks.onRuleTriggered(enrichedFlag, event);
+            } else {
+                console.log(`[Lobsterman] Alert suppressed (cooldown): ${flag.ruleId} (target: ${event.target ?? 'none'})`);
             }
         }
+    } else if (!warmingUp && newFlags.length > 0) {
+        console.log(`[Lobsterman] Flags produced but no onRuleTriggered callback registered!`);
     }
 
     // 6. Fire callback on risk level change (only if not warming up)
@@ -134,13 +172,16 @@ function startFileSource(filePath: string, skipExisting: boolean = false): void 
     const source = new FileEventSource(filePath, 1000, skipExisting);
     currentSource = source;
 
-    // Suppress callbacks during initial file load (builds state silently)
-    warmingUp = true;
+    // Only suppress callbacks during initial startup load (large historical file).
+    // For newly-detected sessions (skipExisting=true), process events live —
+    // those events are current, and cooldown/aggregation prevents flooding.
+    if (!skipExisting) {
+        warmingUp = true;
+    }
     source.start(handleEvent);
     warmingUp = false;
 
-    console.log(`[Lobsterman] File mode started — tailing ${filePath}${skipExisting ? ' (recent + new events)' : ''}`);
-    console.log(`[Lobsterman] State built from history. Now monitoring for new events only.`);
+    console.log(`[Lobsterman] File mode started — tailing ${filePath}${skipExisting ? ' (live events)' : ' (warmed up from history)'}`);
 }
 
 function initializeSource(): void {
@@ -175,7 +216,11 @@ function initializeSource(): void {
             registerCallbacks(telegramCallbacks);
         }
 
+        // Load persisted operator decisions from disk
+        loadDecisions();
+
         // Start session watcher for auto-detection
+        let isFirstSession = true;
         sessionWatcher = new SessionWatcher();
         sessionWatcher.start((session) => {
             // Stop current source if switching sessions
@@ -184,7 +229,19 @@ function initializeSource(): void {
                 currentSource = null;
             }
             stateStore.reset();
-            startFileSource(session.sessionFile, true);
+            clearAlertHistory(); // Fresh session = fresh alert state
+            resetSequence();     // Event numbers restart from 1
+
+            if (isFirstSession) {
+                // First session on startup: suppress alerts (historical data)
+                console.log(`[Lobsterman] Initial session — warming up (suppressing stale alerts)`);
+                startFileSource(session.sessionFile, false); // warmup = true internally
+                isFirstSession = false;
+            } else {
+                // New session detected while running: process live
+                console.log(`[Lobsterman] New session — processing live`);
+                startFileSource(session.sessionFile, true); // no warmup
+            }
         });
     }
 }
@@ -200,6 +257,8 @@ export function resetEngine(): void {
         sessionWatcher = null;
     }
     stopTelegramBot();
+    clearDecisions();
+    clearAlertHistory();
     stateStore.reset();
     initializeSource();
     console.log('[Lobsterman] Reset complete — source restarted');

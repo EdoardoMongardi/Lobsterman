@@ -1,8 +1,8 @@
 /**
  * Message Templates — pre-built Telegram warning messages for each rule.
  *
- * Templates are fast, zero-cost, zero-latency. LLM is only used for
- * session report cards (Phase 7B).
+ * Standardized format: every alert is self-contained so the operator
+ * understands the situation without opening the dashboard.
  */
 
 import { RedFlag, RiskLevel, NormalizedEvent, SupervisorState } from '../core/types';
@@ -22,33 +22,45 @@ const CATEGORY_EMOJI: Record<string, string> = {
     risky_action: '🚨',
 };
 
+const SUGGESTED_ACTIONS: Record<string, string> = {
+    context_danger: 'Check if outputs are unexpectedly large',
+    looping: 'Consider if the agent is stuck in a loop',
+    risky_action: 'Review the action before it causes damage',
+};
+
 // ─── Escape Telegram MarkdownV2 special chars ───
 
 function escMd(text: string): string {
-    return text.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+    return text.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
 }
 
-// ─── Rule-triggered warning ───
+// ─── Rule-triggered warning (standardized format) ───
 
 export function formatRuleWarning(flag: RedFlag, event: NormalizedEvent): string {
     const emoji = CATEGORY_EMOJI[flag.category] ?? '⚠️';
     const severity = RISK_EMOJI[flag.severity];
+    const action = flag.suggestedAction ?? SUGGESTED_ACTIONS[flag.category] ?? 'Review the situation';
+
+    // Truncate target for display (multi-line commands become unreadable)
+    const displayTarget = event.target
+        ? event.target.replace(/\n/g, ' ').slice(0, 60) + (event.target.length > 60 ? '...' : '')
+        : undefined;
+    // Truncate reason similarly
+    const displayReason = flag.reason
+        ? flag.reason.replace(/\n/g, ' ').slice(0, 120) + (flag.reason.length > 120 ? '...' : '')
+        : undefined;
 
     const lines = [
         `${emoji} *${escMd(flag.title)}* ${severity}`,
         ``,
-        `Event \\#${event.sequence}: ${escMd(event.summary)}`,
+        `Event \\#${event.sequence}: \\[${escMd(event.type)}\\]${event.tool ? ` ${escMd(event.tool)}` : ''}${displayTarget ? ` → ${escMd(displayTarget)}` : ''}`,
     ];
 
-    if (event.tool) {
-        lines.push(`Tool: \`${escMd(event.tool)}\``);
+    if (displayReason) {
+        lines.push(`Reason: _${escMd(displayReason)}_`);
     }
-    if (event.target) {
-        lines.push(`Target: \`${escMd(event.target)}\``);
-    }
-    if (flag.reason) {
-        lines.push(``, `_${escMd(flag.reason)}_`);
-    }
+
+    lines.push(`Recommended: ${escMd(action)}`);
 
     return lines.join('\n');
 }

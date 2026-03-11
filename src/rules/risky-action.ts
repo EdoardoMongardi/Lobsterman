@@ -25,6 +25,12 @@ const DESTRUCTIVE_COMMAND_PATTERNS = [
     /chmod\s+777/i,
     /unlink\s/i,
     /shred\s/i,
+    // macOS-specific: osascript-based trash or Finder delete
+    /osascript[\s\S]*delete/i,
+    /osascript[\s\S]*trash/i,
+    /osascript[\s\S]*Finder/i,
+    /trash\s+/i,
+    /move[\s\S]*to\s+trash/i,
 ];
 
 const PROJECT_ROOT = process.env.LOBSTERMAN_PROJECT_ROOT ?? '/Users/example/project';
@@ -74,6 +80,9 @@ export const riskyActionRules: Rule[] = [
             _state: SupervisorState,
             _recentEvents: NormalizedEvent[]
         ): RedFlag | null {
+            // Only check tool_call and tool_result events — NOT assistant messages
+            if (event.type !== 'tool_call' && event.type !== 'tool_result') return null;
+
             const target = event.target ?? '';
             const snippet = event.rawSnippet ?? '';
 
@@ -89,9 +98,10 @@ export const riskyActionRules: Rule[] = [
 
             if (!sensitiveMatch && !destructiveMatch) return null;
 
+            const truncatedTarget = target.length > 80 ? target.slice(0, 80) + '...' : target;
             const reason = sensitiveMatch
-                ? `Agent is touching sensitive file: ${target}`
-                : `Destructive command detected: ${target || snippet.slice(0, 80)}`;
+                ? `Agent is touching sensitive file: ${truncatedTarget}`
+                : `Destructive command detected: ${truncatedTarget || snippet.slice(0, 80)}`;
 
             return {
                 id: crypto.randomUUID(),

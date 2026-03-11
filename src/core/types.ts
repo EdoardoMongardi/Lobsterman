@@ -94,6 +94,7 @@ export interface SupervisorState {
     largeOutputCount: number;
     riskyActionCount: number;
   };
+  operatorDecisions: OperatorDecision[];
 }
 
 // ─── Rule Types ───
