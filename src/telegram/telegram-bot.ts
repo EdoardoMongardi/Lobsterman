@@ -18,7 +18,7 @@ import {
 } from './message-templates';
 import { recordDecision } from './operator-intent';
 import { registerVerificationCallback } from '../verification/verifier-engine';
-import { initSessionSummary } from './session-summary';
+import { initSessionSummary, recordVerificationForSummary } from './session-summary';
 import type { VerificationResult } from '../verification/types';
 import type { RedFlag, RiskLevel, NormalizedEvent, SupervisorState, EngineCallbacks } from '../core/types';
 
@@ -133,6 +133,9 @@ async function handleSessionStart(sessionId: string, task: string): Promise<void
 }
 
 async function handleVerificationResult(result: VerificationResult): Promise<void> {
+    // Track cumulative verification stats for session summary
+    recordVerificationForSummary(result.status);
+
     const text = formatVerificationResult(result);
     if (text) {
         await sendMarkdown(text);

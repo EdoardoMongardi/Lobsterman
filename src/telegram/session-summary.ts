@@ -9,9 +9,13 @@
  */
 
 import { stateStore } from '../core/state-store';
-import { getVerifications } from '../verification/verifier-engine';
+import { RiskLevel } from '../core/types';
 
 const IDLE_TIMEOUT_MS = 60_000; // 60 seconds
+
+const RISK_ORDER: Record<string, number> = {
+    info: 0, low: 1, medium: 2, high: 3, critical: 4,
+};
 
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let lastEventTimestamp: number = 0;
@@ -19,6 +23,11 @@ let sessionStartedAt: number = 0;
 let sentIdleSummary = false;
 let sentFinalSummary = false;
 let sendFn: ((text: string) => Promise<void>) | null = null;
+
+// Cumulative session counters (survive across idle periods)
+let cumulativeVerified = 0;
+let cumulativeMismatches = 0;
+let peakRisk: RiskLevel = 'low';
 
 /**
  * Initialize the session summary module with a send function.
@@ -37,6 +46,26 @@ export function resetSessionSummary(): void {
     sessionStartedAt = 0;
     sentIdleSummary = false;
     sentFinalSummary = false;
+    cumulativeVerified = 0;
+    cumulativeMismatches = 0;
+    peakRisk = 'low';
+}
+
+/**
+ * Record a verification result (called from the verification callback).
+ */
+export function recordVerificationForSummary(status: string): void {
+    if (status === 'verified') cumulativeVerified++;
+    else if (status === 'mismatch') cumulativeMismatches++;
+}
+
+/**
+ * Update peak risk if new risk is higher.
+ */
+export function updatePeakRisk(risk: RiskLevel): void {
+    if ((RISK_ORDER[risk] ?? 0) > (RISK_ORDER[peakRisk] ?? 0)) {
+        peakRisk = risk;
+    }
 }
 
 /**
@@ -140,19 +169,13 @@ function buildSummary(type: 'interim' | 'final'): string | null {
 
     // Risk level
     const RISK_EMOJI: Record<string, string> = {
-        critical: '🔴', high: '🟠', medium: '🟡', low: '🟢', info: '⚪',
+        critical: '🔴', high: '🟠', medium: '🟡', low: '🟢',
     };
-    const peakRisk = state.riskLevel;
     const riskEmoji = RISK_EMOJI[peakRisk] ?? '⚪';
 
     // Decisions
     const acked = state.operatorDecisions.filter(d => d.decision === 'acknowledged').length;
     const flagged = state.operatorDecisions.filter(d => d.decision === 'flagged_for_review').length;
-
-    // Verifications
-    const verifications = getVerifications();
-    const verified = verifications.filter(v => v.status === 'verified').length;
-    const mismatches = verifications.filter(v => v.status === 'mismatch').length;
 
     const lines = [
         `🦞 *Session Report Card \\(${escMd(label)}\\)*`,
@@ -165,14 +188,14 @@ function buildSummary(type: 'interim' | 'final'): string | null {
         `📊 Events: ${state.stats.totalEvents} total`,
         toolBreakdown ? `🛠 Tools: ${escMd(toolBreakdown)}` : '',
         `⚠️ Warnings: ${totalWarnings} triggered`,
-        `${riskEmoji} Risk: ${escMd(peakRisk.toUpperCase())}`,
+        `${riskEmoji} Peak Risk: ${escMd(peakRisk.toUpperCase())}`,
     ];
 
     if (acked + flagged > 0) {
         lines.push(`✅ Decisions: ${acked} acknowledged, ${flagged} flagged`);
     }
-    if (verified + mismatches > 0) {
-        lines.push(`🔍 Verifications: ${verified} verified, ${mismatches} mismatches`);
+    if (cumulativeVerified + cumulativeMismatches > 0) {
+        lines.push(`🔍 Verifications: ${cumulativeVerified} verified, ${cumulativeMismatches} mismatches`);
     }
 
     return lines.filter(Boolean).join('\n');

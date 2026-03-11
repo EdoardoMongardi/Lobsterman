@@ -12,7 +12,7 @@ import { findLatestSession, SessionWatcher } from '../ingestion/session-watcher'
 import { initTelegramBot, stopTelegramBot } from '../telegram/telegram-bot';
 import { loadDecisions, clearDecisions } from '../telegram/operator-intent';
 import { processVerification, clearVerifications } from '../verification/verifier-engine';
-import { onEventReceived, resetSessionSummary } from '../telegram/session-summary';
+import { onEventReceived, resetSessionSummary, updatePeakRisk } from '../telegram/session-summary';
 import { DEMO_TASK, DEMO_CONSTRAINTS } from '../lib/demo-scenario';
 import type { EventSourceAdapter } from './types';
 
@@ -170,6 +170,7 @@ function handleEvent(event: NormalizedEvent): void {
     const riskLevel = computeRiskLevel(activeRedFlags);
     const recommendedAction = computeIntervention(activeRedFlags);
     const previousRiskLevel = currentState.riskLevel;
+    updatePeakRisk(riskLevel); // Track highest risk for session summary
 
     // 5. Fire callbacks for new flags — COMPOSED per event
     //    When one event triggers multiple rules (e.g., outside-root + destructive),
