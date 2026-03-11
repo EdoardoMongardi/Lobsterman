@@ -101,8 +101,8 @@ export const loopingRules: Rule[] = [
                     : 0;
             const eventsSinceProgress = event.sequence - lastProgressSeq;
 
-            // Only flag after 50+ events with no progress (real sessions are verbose)
-            if (eventsSinceProgress < 50) return null;
+            // Only flag after 100+ events with no progress (real sessions are verbose)
+            if (eventsSinceProgress < 100) return null;
 
             return {
                 id: crypto.randomUUID(),

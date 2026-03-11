@@ -93,20 +93,27 @@ function detectProgressMarker(
 
     // Command succeeded — check tool_result from command tools
     if (event.type === 'tool_result' && COMMAND_TOOLS.has(tool)) {
+        // Any non-error tool_result from a command is progress
+        // (the agent executed something and got a result)
         const snippet = event.rawSnippet ?? '';
-        const exitCodeTag = event.tags.includes('exitCode:0');
-        const successPattern = /completed successfully|no errors|passed|exit code: 0/i.test(snippet);
+        const isBuild = snippet.includes('build') || (event.target?.includes('build') ?? false);
+        const isTest = snippet.includes('test') || (event.target?.includes('test') ?? false);
+        return {
+            sequence: event.sequence,
+            timestamp: event.timestamp,
+            description: `${isBuild ? 'Build' : isTest ? 'Tests' : 'Command'} completed`,
+            type: isBuild ? 'build_passed' : isTest ? 'test_passed' : 'command_succeeded',
+        };
+    }
 
-        if (exitCodeTag || successPattern) {
-            const isBuild = event.target?.includes('build');
-            const isTest = event.target?.includes('test');
-            return {
-                sequence: event.sequence,
-                timestamp: event.timestamp,
-                description: `${isBuild ? 'Build' : isTest ? 'Tests' : 'Command'} passed`,
-                type: isBuild ? 'build_passed' : isTest ? 'test_passed' : 'command_succeeded',
-            };
-        }
+    // User interaction = progress (the human is engaged)
+    if (event.type === 'user_message') {
+        return {
+            sequence: event.sequence,
+            timestamp: event.timestamp,
+            description: 'User message received',
+            type: 'command_succeeded',
+        };
     }
 
     return null;
