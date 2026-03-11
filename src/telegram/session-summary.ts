@@ -111,10 +111,14 @@ function buildSummary(type: 'interim' | 'final'): string | null {
         ? formatDuration(lastEventTimestamp - sessionStartedAt)
         : 'unknown';
 
-    // Task
-    const task = state.originalTask
-        ? state.originalTask.slice(0, 60) + (state.originalTask.length > 60 ? '...' : '')
-        : 'Unknown task';
+    const shortSessionId = state.sessionId
+        ? state.sessionId.slice(0, 8)
+        : 'unknown';
+
+    // Latest user request
+    const latestRequest = state.originalTask
+        ? state.originalTask.slice(0, 80) + (state.originalTask.length > 80 ? '...' : '')
+        : 'No user request detected';
 
     // Tool breakdown: count by tool name
     const toolCounts: Record<string, number> = {};
@@ -134,7 +138,7 @@ function buildSummary(type: 'interim' | 'final'): string | null {
         + state.stats.repeatedActionCount
         + state.stats.riskyActionCount;
 
-    // Peak risk (highest severity seen in active flags)
+    // Risk level
     const RISK_EMOJI: Record<string, string> = {
         critical: '🔴', high: '🟠', medium: '🟡', low: '🟢', info: '⚪',
     };
@@ -153,15 +157,17 @@ function buildSummary(type: 'interim' | 'final'): string | null {
     const lines = [
         `🦞 *Session Report Card \\(${escMd(label)}\\)*`,
         ``,
-        `📋 Task: "${escMd(task)}"`,
+        `🔑 Session: \`${escMd(shortSessionId)}\``,
+        `💬 Latest: "${escMd(latestRequest)}"`,
+        ``,
+        `_Cumulative session stats:_`,
         `⏱ Duration: ${escMd(duration)}`,
         `📊 Events: ${state.stats.totalEvents} total`,
         toolBreakdown ? `🛠 Tools: ${escMd(toolBreakdown)}` : '',
         `⚠️ Warnings: ${totalWarnings} triggered`,
-        `${riskEmoji} Peak Risk: ${escMd(peakRisk.toUpperCase())}`,
+        `${riskEmoji} Risk: ${escMd(peakRisk.toUpperCase())}`,
     ];
 
-    // Only show decisions/verifications if any exist
     if (acked + flagged > 0) {
         lines.push(`✅ Decisions: ${acked} acknowledged, ${flagged} flagged`);
     }

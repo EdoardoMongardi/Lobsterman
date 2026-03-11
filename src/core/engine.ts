@@ -135,14 +135,14 @@ function extractTaskText(raw: string): string {
 }
 
 function handleEvent(event: NormalizedEvent): void {
-    // Auto-extract task from first user message (used in file mode)
+    // Track latest user message for session summary
     const preState = stateStore.getState();
-    if (!preState.originalTask && event.type === 'user_message' && event.rawSnippet) {
+    if (event.type === 'user_message' && event.rawSnippet) {
         const taskText = extractTaskText(event.rawSnippet);
         stateStore.updateState({ originalTask: taskText });
 
-        // Fire session start callback (only if not warming up)
-        if (!warmingUp && callbacks.onSessionStart) {
+        // Fire session start callback on first user message only
+        if (!warmingUp && !preState.originalTask && callbacks.onSessionStart) {
             callbacks.onSessionStart(preState.sessionId, taskText);
         }
     }
