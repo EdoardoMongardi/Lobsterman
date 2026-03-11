@@ -150,12 +150,17 @@ function handleEvent(event: NormalizedEvent): void {
     // 1. Push event to state store (runs state updater internally)
     stateStore.pushEvent(event);
 
+    // During warmup: only ingest events for state tracking.
+    // Skip rules, flags, stats, verification, and idle timer.
+    // This prevents stale historical events from inflating the report card.
+    if (warmingUp) return;
+
     // 2. Run rule engine
     const recentEvents = stateStore.getAllEvents().slice(-25);
     const newFlags = ruleEngine.evaluate(event, stateStore.getState(), recentEvents);
 
     // Debug: log rule evaluation
-    if (!warmingUp && newFlags.length > 0) {
+    if (newFlags.length > 0) {
         console.log(`[Lobsterman] Rules fired ${newFlags.length} flag(s) for event #${event.sequence}: ${newFlags.map(f => f.ruleId).join(', ')}`);
     }
 
@@ -174,7 +179,7 @@ function handleEvent(event: NormalizedEvent): void {
     // 5. Fire callbacks for new flags — COMPOSED per event
     //    When one event triggers multiple rules (e.g., outside-root + destructive),
     //    compose into a single alert with highest severity and merged context.
-    if (!warmingUp && callbacks.onRuleTriggered && newFlags.length > 0) {
+    if (callbacks.onRuleTriggered && newFlags.length > 0) {
         // Collect all alertable flags (pass cooldown)
         const alertableFlags: RedFlag[] = [];
         for (const flag of newFlags) {
@@ -190,25 +195,22 @@ function handleEvent(event: NormalizedEvent): void {
         }
 
         if (alertableFlags.length > 0) {
-            // Compose into one alert
             const composed = composeFlags(alertableFlags);
             console.log(`[Lobsterman] Sending composed alert (${alertableFlags.map(f => f.ruleId).join(' + ')})`);
             callbacks.onRuleTriggered(composed, event);
         }
-    } else if (!warmingUp && newFlags.length > 0) {
+    } else if (newFlags.length > 0) {
         console.log(`[Lobsterman] Flags produced but no onRuleTriggered callback registered!`);
     }
 
-    // 6. Fire callback on risk level change (only if not warming up)
-    if (!warmingUp && callbacks.onRiskChanged && riskLevel !== previousRiskLevel) {
+    // 6. Fire callback on risk level change
+    if (callbacks.onRiskChanged && riskLevel !== previousRiskLevel) {
         callbacks.onRiskChanged(previousRiskLevel, riskLevel, activeRedFlags);
     }
 
-    // 6b. Run verification pipeline (only if not warming up)
-    if (!warmingUp) {
-        processVerification(event);
-        onEventReceived(); // Reset idle timer for session summary
-    }
+    // 6b. Run verification pipeline and idle timer
+    processVerification(event);
+    onEventReceived();
 
     // 7. Update phase based on risk
     let currentPhase = currentState.currentPhase;

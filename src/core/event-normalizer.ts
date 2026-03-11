@@ -14,6 +14,9 @@ export function normalizeEvent(
     const type = mapEventType(raw.type);
     const payloadSize = computePayloadSize(raw);
 
+    // User messages need more space (metadata wrapper takes ~150 chars)
+    const snippetLimit = type === 'user_message' ? 500 : 200;
+
     return {
         id: crypto.randomUUID(),
         timestamp: raw.timestamp ?? Date.now(),
@@ -24,7 +27,7 @@ export function normalizeEvent(
         target: raw.target,
         payloadSize,
         summary: buildSummary(raw, type),
-        rawSnippet: truncateSnippet(raw.content ?? raw.error, 200),
+        rawSnippet: truncateSnippet(raw.content ?? raw.error, snippetLimit),
         tags: extractTags(raw),
     };
 }
