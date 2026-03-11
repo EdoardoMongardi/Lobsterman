@@ -194,8 +194,12 @@ function buildSummary(type: 'interim' | 'final'): string | null {
     if (acked + flagged > 0) {
         lines.push(`✅ Decisions: ${acked} acknowledged, ${flagged} flagged`);
     }
+
+    // Verification stats — scoped to live monitoring only
     if (cumulativeVerified + cumulativeMismatches > 0) {
-        lines.push(`🔍 Verifications: ${cumulativeVerified} verified, ${cumulativeMismatches} mismatches`);
+        lines.push(``);
+        lines.push(`_Verified \\(since monitoring started\\):_`);
+        lines.push(`🔍 ${cumulativeVerified} verified, ${cumulativeMismatches} mismatches`);
     }
 
     return lines.filter(Boolean).join('\n');
