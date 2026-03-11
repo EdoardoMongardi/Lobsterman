@@ -9,19 +9,25 @@ const SENSITIVE_FILE_PATTERNS = [
     /\.ssh\//i,
     /id_rsa/i,
     /\.aws\//i,
+    /\.Trash/i,
 ];
 
 const DESTRUCTIVE_COMMAND_PATTERNS = [
     /rm\s+(-rf?|--recursive)/i,
+    /rm\s+/i,
+    /mv\s+.*\.Trash/i,
+    /mv\s+.*\/tmp/i,
     /DROP\s+(TABLE|DATABASE)/i,
     /DELETE\s+FROM/i,
     /truncate\s+table/i,
     /mkfs\./i,
     />\s*\/dev\//i,
     /chmod\s+777/i,
+    /unlink\s/i,
+    /shred\s/i,
 ];
 
-const PROJECT_ROOT = process.env.WATCHTOWER_PROJECT_ROOT ?? '/Users/example/project';
+const PROJECT_ROOT = process.env.LOBSTERMAN_PROJECT_ROOT ?? '/Users/example/project';
 
 export const riskyActionRules: Rule[] = [
     {

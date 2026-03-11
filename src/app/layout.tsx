@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpenClaw Watchtower",
+  title: "Lobsterman",
   description: "Runtime watchdog for long-running OpenClaw workflows",
 };
 

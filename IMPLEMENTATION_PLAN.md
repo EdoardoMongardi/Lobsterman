@@ -1294,6 +1294,533 @@ Phase 0 ──→ Phase 1 ──→ Phase 2 ──→ Phase 3 ──→ Phase 4 
                                                            Phase 6
                                                           🔴 HUMAN INPUT
                                                             🟡 STOP
+                                                                │
+                                                        Phase 7 (A→B→C)
+                                                          🔴 HUMAN INPUT
+                                                            🟡 STOP
+                                                                │
+                                                           Phase 8
+                                                       (Execution Verification)
+                                                            🟡 STOP
 ```
 
 All phases are strictly sequential. Claude stops at every phase boundary. No phase begins without explicit user confirmation from the previous checkpoint.
+
+---
+
+## Phase 7: Telegram Bot Integration
+
+> **Branding cleanup**: This phase also renames all existing `WATCHTOWER_*` env vars and `[Watchtower]` console logs to `LOBSTERMAN_*` / `[Lobsterman]`.
+
+### Goal
+
+Make Lobsterman a Telegram-first monitoring companion that sends real-time warnings, captures operator decisions, and delivers session report cards. Direct runtime control of OpenClaw is **optional** and only enabled after the underlying control API is verified.
+
+### Product Layering
+
+| Surface | Role | Priority |
+|---|---|---|
+| Telegram DM | **Operator surface** — alerts, decisions, daily use | Primary |
+| Web dashboard | **Investigation surface** — deep-dive, timeline, details | Complementary |
+
+Role separation:
+- **OpenClaw** = actor (executes tasks)
+- **Lobsterman** = supervisor (monitors, warns, reports)
+- **Telegram DM** = human control surface (receives alerts, makes decisions)
+
+### Architecture
+
+```
+┌─────────────┐     JSONL      ┌─────────────┐    Templated     ┌──────────────┐
+│  OpenClaw   │ ──────────▶    │  Lobsterman  │ ─────────────▶  │ Telegram Bot │
+│  (Gateway)  │   sessions/    │   Engine     │    warnings      │  (DM to user)│
+└─────────────┘                └──────┬───────┘                  └──────┬───────┘
+       ▲                              │                                 │
+       │                              │ on session end                  │ inline buttons
+       │                              ▼                                 ▼
+       │                       ┌─────────────┐                  ┌──────────────┐
+       │                       │ OpenAI LLM  │                  │ Operator     │
+       │                       │ (report gen)│                  │ Intent Layer │
+       │                       └──────┬──────┘                  └──────┬───────┘
+       │                              │                                │
+       │                              ▼                                ▼
+       │                       Session Report                   Decision logged
+       │                       (sent to Telegram)               + shown on dashboard
+       │                                                               │
+       └── [Phase 7C only, after API verification] ────────────────────┘
+```
+
+### Design Decisions
+
+1. **Separate DM chat** — Lobsterman bot DMs the user directly, does NOT join the OpenClaw chat
+2. **Templated warnings** — Pre-built templates for each rule (fast, zero cost, zero latency). LLM used only for session report cards
+3. **Operator Intent Layer** — Inline buttons (`[Pause] [Continue] [Stop]`) capture the user's **decision** and log it. Real OpenClaw control is deferred to Phase 7C, after the Gateway WS control API is verified
+4. **Web dashboard as complementary** — Kept as an investigation/deep-dive view
+
+### Prerequisites (User Action Required)
+
+- [ ] Create a Telegram bot via [@BotFather](https://t.me/BotFather), get the bot token
+- [ ] Get your Telegram chat ID (message the bot, then retrieve via API)
+- [ ] Provide token + chat ID as env vars
+
+---
+
+### Phase 7A — Telegram Notifications MVP
+
+**This sub-phase is the core deliverable.** It's already demo-ready and provides real product value.
+
+#### What it does
+
+- Session start/end notifications in Telegram DM
+- Templated rule-triggered warnings with event context
+- Risk escalation alerts
+- Inline buttons as **operator intent capture** (log decision + confirm, no real control yet)
+- Dashboard link button
+
+#### New files
+
+**`src/ingestion/session-watcher.ts`** — Generic session auto-detection
+
+- Reads `OPENCLAW_STATE_DIR` (default `~/.openclaw`)
+- Discovers all agent session directories: `agents/*/sessions/`
+- Uses `sessions.json` as the **session registry/metadata source** (not just FS timestamps)
+- Uses `*.jsonl` files as the **event transcript source**
+- Detects new/active sessions by `updatedAt` in `sessions.json`
+- Auto-switches the file source when a new session starts
+- Supports multi-agent setups, not hardcoded to `main`
+
+**`src/telegram/telegram-bot.ts`** — Bot core
+
+- Uses `node-telegram-bot-api` (long-polling, no webhooks)
+- Env: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+- Sends structured DM messages
+- Handles inline keyboard callbacks
+
+**`src/telegram/message-templates.ts`** — Pre-built warning templates
+
+| Rule | Template |
+|---|---|
+| `cd-large-output` | `⚠️ Large Output — Event #12: Tool Read returned 24KB` |
+| `lp-repeated-tool-target` | `🔄 Possible Loop — Edit → src/app.tsx called 4× in a row` |
+| `lp-error-retry-loop` | `🔄 Error Retry Loop — 3 consecutive errors, may be stuck` |
+| `ra-path-outside-root` | `🚨 File Outside Project — accessed /etc/hosts` |
+| `ra-sensitive-destructive` | `🚨 Risky Command — ran: rm -rf node_modules` |
+| Risk escalation | `📊 Risk Changed — 🟡 medium → 🔴 critical` |
+| Session start | `🦞 New Session — Task: "Summarize the project"` |
+| Session end | `✅ Session Complete — 19 events, 0 warnings` |
+
+Inline buttons on each warning (operator intent, not real control):
+```
+[👀 Acknowledged] [⚠️ Flag for Review] [🔍 Dashboard]
+```
+
+**`src/telegram/operator-intent.ts`** — Decision capture layer
+
+- Records user button presses: `{ timestamp, decision, ruleId, userId }`
+- Stores decisions in state (in-memory + persisted)
+- Exposes decisions via dashboard API for the web UI
+- Does NOT send commands to OpenClaw (that's Phase 7C)
+
+#### Modified files
+
+| File | Changes |
+|---|---|
+| `src/core/engine.ts` | Add callback hooks: `onRuleTriggered`, `onRiskChanged`, `onSessionStart`, `onSessionEnd` |
+| `src/core/types.ts` | Rename `WatchtowerMode` → `LobstermanMode`, add `'telegram'` option, add `OperatorDecision` type |
+| `.env.local` | New vars: `LOBSTERMAN_MODE=telegram`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `OPENCLAW_STATE_DIR` |
+| `package.json` | Add: `node-telegram-bot-api`, `@types/node-telegram-bot-api` |
+
+#### Branding cleanup (also in this sub-phase)
+
+Rename across the entire codebase:
+- `WATCHTOWER_MODE` → `LOBSTERMAN_MODE`
+- `WATCHTOWER_SOURCE_FILE` → `LOBSTERMAN_SOURCE_FILE`
+- `WATCHTOWER_PROJECT_ROOT` → `LOBSTERMAN_PROJECT_ROOT`
+- `[Watchtower]` console logs → `[Lobsterman]`
+
+#### Checkpoint
+
+**Claude continue condition:** User confirms "Telegram notifications work, Phase 7A complete."
+
+---
+
+### Phase 7B — Session Report Card (LLM)
+
+**Upgrades Lobsterman from "alert tool" to "monitoring assistant".**
+
+#### What it does
+
+- Detects session idle (no new events for 30s) or session end (via `sessions.json` status)
+- Generates a concise report card via OpenAI (`gpt-4o-mini`)
+- Sends report to Telegram DM as a formatted summary
+
+#### New files
+
+**`src/telegram/session-reporter.ts`**
+
+- Collects session data: task, duration, event count, tools used, files touched, warnings triggered, risk level
+- Calls OpenAI with structured prompt for a concise report card
+- Formats output as Telegram MarkdownV2
+- Example output:
+  ```
+  🦞 Session Report Card
+
+  📋 Task: "Summarize NYUBuddy project"
+  ⏱ Duration: 2m 34s
+  📊 Events: 19 | Tools: Read(5), Write(2), Edit(3)
+  ⚠️ Warnings: 0 | Risk: 🟢 LOW
+  📁 Files touched: 4
+  
+  ✅ Assessment: Clean session, no issues detected.
+  ```
+
+#### Modified files
+
+| File | Changes |
+|---|---|
+| `package.json` | Add: `openai` |
+| `.env.local` | Add: `OPENAI_API_KEY` (if not already set) |
+
+#### Checkpoint
+
+**Claude continue condition:** User confirms "Session reports work, Phase 7B complete."
+
+---
+
+### Phase 7C — Real Gateway Intervention (Research Required)
+
+**Only proceed after verifying the OpenClaw Gateway WS control API.**
+
+#### Research first
+
+Before writing any code:
+1. Investigate OpenClaw Gateway WS protocol documentation
+2. Check if `pause`, `resume`, `stop` (or equivalent) operations exist as API calls
+3. Test with `openclaw gateway --help`, `openclaw agent --help`, and inspect the WS protocol
+4. Document findings: exact method names, parameters, auth requirements
+
+#### If control API exists
+
+- Upgrade inline buttons from intent capture to real control:
+  ```
+  [⏸ Pause OpenClaw] [▶️ Resume] [🛑 Stop Session]
+  ```
+- New file: `src/telegram/openclaw-client.ts`
+  - Connects to Gateway WS
+  - Reads auth token from `~/.openclaw/openclaw.json`
+  - Implements verified control methods
+- Update `operator-intent.ts` to forward decisions to the real API
+
+#### If control API doesn't exist (or is unstable)
+
+- Keep the Operator Intent Layer as-is
+- Add a "control API not available" note in the dashboard
+- Consider filing a feature request with OpenClaw if the API gap is clear
+
+#### Checkpoint
+
+**Claude continue condition:** User confirms "Phase 7C research complete" OR "Phase 7C control wiring works."
+
+### Implementation Workflow (Step-by-Step)
+
+> **Workflow rules:**
+> - 🤖 = Claude does this autonomously
+> - 🔴 = Human action required — Claude MUST stop and wait
+> - 🟡 = Checkpoint — Claude runs self-validation, then stops for human confirmation
+> - Claude must NOT proceed past any 🔴 or 🟡 step without explicit user confirmation
+
+---
+
+#### Phase 7A — Telegram Notifications MVP
+
+**Step 1** 🤖 Branding cleanup
+- Rename all `WATCHTOWER_*` → `LOBSTERMAN_*` across codebase
+- Rename all `[Watchtower]` console logs → `[Lobsterman]`
+- Run `npx tsc --noEmit` to verify no breakage
+
+**Step 2** 🤖 Session watcher
+- Create `src/ingestion/session-watcher.ts`
+- Generic multi-agent support (`agents/*/sessions/`)
+- Use `sessions.json` as metadata + `*.jsonl` as transcripts
+- Wire into engine
+
+**Step 3** 🤖 Engine callback hooks
+- Add `onRuleTriggered`, `onRiskChanged`, `onSessionStart`, `onSessionEnd` to engine
+- Add `OperatorDecision` type to types.ts
+- Run `npx tsc --noEmit`
+
+**🟡 STOP — Checkpoint A1**
+Claude runs: `npx tsc --noEmit` + `npm run build`
+Claude reports: results, files changed, any issues
+**Claude continue condition:** User confirms "Steps 1-3 look good, continue."
+
+---
+
+**Step 4** 🔴 HUMAN — Create Telegram bot
+User must:
+1. Open Telegram → message [@BotFather](https://t.me/BotFather)
+2. Send `/newbot`
+3. Name: `Lobsterman` (or similar)
+4. Username: `lobsterman_watch_bot` (or similar)
+5. Copy the bot token
+6. Message the bot (send any message like "hi") to initialize the chat
+7. Provide bot token to Claude
+
+**Claude MUST stop here and wait for the user to provide the bot token.**
+
+---
+
+**Step 5** 🤖 Get user's Telegram chat ID
+- Use the bot token to call `getUpdates` API and extract the chat ID
+- Confirm chat ID with user
+
+**Step 6** 🔴 HUMAN — Set environment variables
+User must update `.env.local` with:
+```
+LOBSTERMAN_MODE=telegram
+TELEGRAM_BOT_TOKEN=<token from step 4>
+TELEGRAM_CHAT_ID=<id from step 5>
+OPENCLAW_STATE_DIR=~/.openclaw
+LOBSTERMAN_PROJECT_ROOT=<project path>
+```
+(Claude can pre-fill the file, but user must verify sensitive values)
+
+---
+
+**Step 7** 🤖 Install dependencies
+- `npm install node-telegram-bot-api`
+- `npm install -D @types/node-telegram-bot-api`
+
+**Step 8** 🤖 Telegram bot core
+- Create `src/telegram/telegram-bot.ts`
+- Create `src/telegram/message-templates.ts`
+- Create `src/telegram/operator-intent.ts`
+- Wire engine callbacks → Telegram notifications
+
+**Step 9** 🤖 Self-validation
+- Run `npx tsc --noEmit`
+- Run `npm run build`
+
+**🟡 STOP — Checkpoint A2**
+Claude reports: build results, files created, ready for live test
+**Claude continue condition:** User confirms "Build passes, ready to test."
+
+---
+
+**Step 10** 🔴 HUMAN — Live integration test
+User must:
+1. Restart dev server (`npm run dev`)
+2. Start OpenClaw gateway + TUI
+3. Give OpenClaw a task
+4. Verify in Telegram DM:
+   - [ ] Session start message received
+   - [ ] Warning messages appear when rules trigger
+   - [ ] Inline buttons work (log acknowledgement)
+   - [ ] Dashboard link opens web UI
+5. Report results to Claude
+
+**Claude MUST stop here and wait for user test results.**
+
+---
+
+**🟡 STOP — Phase 7A Complete**
+**Claude continue condition:** User confirms "Phase 7A works, move to 7B."
+
+---
+
+#### Phase 7B — Session Report Card (LLM)
+
+**Step 11** 🤖 Install OpenAI SDK
+- `npm install openai`
+
+**Step 12** 🤖 Session reporter
+- Create `src/telegram/session-reporter.ts`
+- Implement idle/end detection (30s no events or `sessions.json` status)
+- LLM call with structured prompt → formatted Telegram report
+
+**Step 13** 🤖 Self-validation
+- Run `npx tsc --noEmit` + `npm run build`
+
+**🟡 STOP — Checkpoint B1**
+Claude reports: build results, example report prompt
+**Claude continue condition:** User confirms "Build passes, ready to test."
+
+---
+
+**Step 14** 🔴 HUMAN — Live report test
+User must:
+1. Restart dev server
+2. Run an OpenClaw task, let it complete
+3. Wait 30s after last event
+4. Verify in Telegram DM:
+   - [ ] Session report card received
+   - [ ] Content is accurate (task, duration, tools, warnings)
+   - [ ] Formatting looks good
+5. Report results to Claude
+
+**Claude MUST stop here and wait for user test results.**
+
+---
+
+**🟡 STOP — Phase 7B Complete**
+**Claude continue condition:** User confirms "Phase 7B works, move to 7C."
+
+---
+
+#### Phase 7C — Real Gateway Intervention (Research)
+
+**Step 15** 🤖 Research OpenClaw Gateway WS control API
+- Run `openclaw gateway --help`, `openclaw agent --help`
+- Search OpenClaw docs for pause/resume/stop methods
+- Inspect WS protocol if accessible
+- Document findings
+
+**🟡 STOP — Checkpoint C1**
+Claude reports: API findings, recommendation (proceed or defer)
+**Claude continue condition:** User decides whether to proceed with real control or stay with intent layer.
+
+---
+
+**Step 16** 🤖 (conditional) Wire real control if API exists
+- Only if Step 15 found a usable API
+- Create `src/telegram/openclaw-client.ts`
+- Upgrade inline buttons to real Pause/Resume/Stop
+
+**Step 17** 🔴 HUMAN — (conditional) Live intervention test
+- Only if Step 16 was implemented
+- User runs OpenClaw task, presses Pause → verifies OpenClaw actually pauses
+
+**🟡 STOP — Phase 7C Complete**
+
+---
+
+## Phase 8: Execution Verification Layer (Future)
+
+> **Research basis**: Agents of Chaos (Harvard/MIT, 2026), PayPal "Proxy State-Based Evaluation", execution hallucination literature, NCSC LLM guidance.
+
+### Why This Phase Exists
+
+Lobsterman currently operates at **Trust Level 2** (gateway JSONL transcripts) — far stronger than agent self-reports (Level 1), but not yet at **Trust Level 3** (verified outcomes). The research makes a clear case:
+
+| Trust Level | Source | What It Tells You | Lobsterman |
+|---|---|---|---|
+| 1. Self-report | Agent text summary | "I did it" | ❌ Not used |
+| 2. Gateway transcript | JSONL tool calls/results | "The system recorded the attempt" | ✅ Current |
+| 3. Verified outcome | Independent checks | "We confirmed the world changed" | 🔲 Phase 8 |
+
+The gap: JSONL tells us what was **attempted**, not what **actually happened**. An agent can call `Write("src/auth.ts")` → `result: success`, but the content written could be garbage, or a build could silently break.
+
+### Goal
+
+Move Lobsterman from "we read what happened" to "we verify what happened" — closing the execution hallucination gap with cheap, deterministic checks.
+
+### Verification Checks (Scoped to What's Cheap)
+
+| Check | Trigger | How | Difficulty |
+|---|---|---|---|
+| **File existence** | Agent says "wrote file X" | `fs.existsSync(X)` after write event | Easy |
+| **File size delta** | Agent edited a file | Compare pre/post sizes via `fs.statSync` | Easy |
+| **Git diff verification** | Agent claims code changes | `git diff --stat` in project root | Easy |
+| **Command exit code** | Agent ran build/test | Verify exit code from tool result | Easy |
+| **Build artifact check** | Agent ran `npm run build` | Check for expected output dir/files | Medium |
+| **Session integrity** | Ongoing monitoring | Detect 1-line JSONL, stale transcripts | Medium |
+| **Silent failure** | Agent active but no progress | No meaningful state change for N minutes | Medium |
+
+### Architecture Addition
+
+```
+┌─────────────┐     JSONL     ┌─────────────┐     Alerts     ┌──────────────┐
+│  OpenClaw   │ ──────────▶   │  Lobsterman  │ ───────────▶  │ Telegram Bot │
+│  (Gateway)  │   sessions/   │   Engine     │               │  (DM to user)│
+└─────────────┘               └──────┬───────┘               └──────────────┘
+                                     │
+                                     │ after tool_call events
+                                     ▼
+                              ┌─────────────┐
+                              │ Verification │  ← NEW
+                              │   Layer      │
+                              └──────┬──────┘
+                                     │
+                                     ▼
+                              File system / git / process checks
+                              Produces: VerifiedOutcome | Mismatch alert
+```
+
+### New Types
+
+```typescript
+type VerificationStatus = 'verified' | 'mismatch' | 'unverifiable';
+
+interface VerifiedOutcome {
+  eventId: number;
+  claimed: string;        // "wrote src/auth.ts"
+  observed: string;       // "file exists, 2.4KB, modified at ..."
+  status: VerificationStatus;
+  checkedAt: number;
+}
+```
+
+### New Rules (Phase 8)
+
+| Rule ID | What | Severity |
+|---|---|---|
+| `ev-file-not-found` | Agent claimed write, but file doesn't exist | Critical |
+| `ev-build-failed` | Agent claimed build success, but exit code ≠ 0 | High |
+| `ev-silent-failure` | No meaningful events for 5+ minutes | Medium |
+| `ev-transcript-stale` | JSONL file hasn't grown in 10+ minutes during active session | Medium |
+| `ev-git-no-changes` | Agent claimed edits, but `git status` shows clean | High |
+
+### OpenClaw Posture Checks (Bonus)
+
+Leverage OpenClaw's own diagnostic tools as alert sources:
+- `openclaw doctor` → parse output for known issues
+- `openclaw security audit` → surface findings as Telegram alerts
+- Version checks → warn if running a version with known CVEs
+
+### What This Phase Does NOT Do
+
+- ❌ Does not fix OpenClaw vulnerabilities (that's upstream)
+- ❌ Does not prevent prompt injection (NCSC says this may not be "fixable")
+- ❌ Does not vet ClawHub skills (platform-scale problem)
+- ❌ Does not replace minimum-privilege design (user responsibility)
+
+### Prerequisites
+
+- Phase 7A complete (Telegram alerts working)
+- Filesystem access to the project root being monitored
+- Git available in the project (for git-based checks)
+
+### Checkpoint
+
+**Claude continue condition:** User confirms "Phase 8 scoping complete, ready to implement."
+
+---
+
+## Product Positioning
+
+> Updated based on Agents of Chaos research (Harvard/MIT 2026), OpenClaw security advisories, NCSC LLM guidance, and PayPal state-based evaluation work.
+
+### What Lobsterman Is
+
+**Lobsterman — AI Agent Runtime Safety & Audit Layer**
+
+- Runtime monitoring of agent sessions
+- Deterministic guardrails (rules, not LLM-in-the-loop)
+- Human-in-the-loop intervention surface
+- Evidence-backed reporting (gateway transcripts, not self-reports)
+- Post-incident audit trail
+
+### What Lobsterman Is NOT
+
+- ❌ Not an AI assistant or productivity tool
+- ❌ Not a replacement for OpenClaw's security patches
+- ❌ Not a prompt injection "solution" (NCSC says this is unsolved)
+- ❌ Not a substitute for minimum-privilege architecture
+
+### The Trust Model
+
+```
+Agent says "I did it"          → Don't trust (execution hallucination risk)
+Gateway logs show it happened  → Trust but verify (Lobsterman Level 2)
+Independent check confirms it  → Verified (Lobsterman Level 3, Phase 8)
+```

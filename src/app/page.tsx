@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { SupervisorState, NormalizedEvent, DashboardResponse, EventsResponse, WatchtowerMode, RiskLevel } from '@/core/types';
+import { SupervisorState, NormalizedEvent, DashboardResponse, EventsResponse, LobstermanMode, RiskLevel } from '@/core/types';
 import { riskLevelToNumber } from '@/lib/utils';
 import { Dashboard } from '@/components/Dashboard';
 
@@ -15,7 +15,7 @@ function notifyRiskEscalation(level: RiskLevel, topReason?: string): void {
     }
     if (Notification.permission !== 'granted') return;
 
-    const title = `Watchtower — Risk: ${level.toUpperCase()}`;
+    const title = `Lobsterman — Risk: ${level.toUpperCase()}`;
     const body = topReason
       ? topReason.slice(0, 100) + (topReason.length > 100 ? '…' : '')
       : 'Check the dashboard for details.';
@@ -29,7 +29,7 @@ export default function Home() {
   const [state, setState] = useState<SupervisorState | null>(null);
   const [events, setEvents] = useState<NormalizedEvent[]>([]);
   const [updatedAt, setUpdatedAt] = useState(0);
-  const [mode, setMode] = useState<WatchtowerMode>('demo');
+  const [mode, setMode] = useState<LobstermanMode>('demo');
   const [startTime, setStartTime] = useState(Date.now());
   const [elapsed, setElapsed] = useState(0);
   const [resetting, setResetting] = useState(false);
@@ -126,13 +126,12 @@ export default function Home() {
       <header className="border-b border-gray-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-bold text-white tracking-tight">
-            Watchtower
+            Lobsterman
           </h1>
-          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${
-            mode === 'file'
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${mode === 'file'
               ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-500/30'
               : 'bg-blue-900/50 text-blue-400 border border-blue-500/30'
-          }`}>
+            }`}>
             {mode === 'file' ? 'Live Mode' : 'Demo Mode'}
           </span>
         </div>
@@ -142,11 +141,10 @@ export default function Home() {
           </span>
           {state && (
             <span
-              className={`h-2 w-2 rounded-full ${
-                state.stats.totalEvents > 0
+              className={`h-2 w-2 rounded-full ${state.stats.totalEvents > 0
                   ? 'bg-emerald-400 animate-pulse'
                   : 'bg-gray-700'
-              }`}
+                }`}
             />
           )}
           <button
@@ -168,7 +166,7 @@ export default function Home() {
           <div className="flex items-center justify-center h-[60vh]">
             <div className="text-center">
               <div className="animate-spin h-8 w-8 border-2 border-gray-600 border-t-blue-400 rounded-full mx-auto mb-4" />
-              <p className="text-sm text-gray-500">Initializing Watchtower...</p>
+              <p className="text-sm text-gray-500">Initializing Lobsterman...</p>
             </div>
           </div>
         )}

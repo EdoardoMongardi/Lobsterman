@@ -14,8 +14,8 @@ export const loopingRules: Rule[] = [
             // Only check tool_call events with a tool and target
             if (event.type !== 'tool_call' || !event.tool || !event.target) return null;
 
-            // Count matching (tool, target) pairs in last 15 events
-            const window = [...recentEvents.slice(-14), event];
+            // Count matching (tool, target) pairs in last 25 events
+            const window = [...recentEvents.slice(-24), event];
             const matchCount = window.filter(
                 (e) =>
                     e.type === 'tool_call' &&
@@ -23,9 +23,10 @@ export const loopingRules: Rule[] = [
                     e.target === event.target
             ).length;
 
-            if (matchCount < 3) return null;
+            // Only flag if genuinely repetitive (5+ identical calls)
+            if (matchCount < 5) return null;
 
-            const severity = matchCount >= 5 ? 'high' as const : 'medium' as const;
+            const severity = matchCount >= 8 ? 'high' as const : 'medium' as const;
 
             return {
                 id: crypto.randomUUID(),
@@ -55,19 +56,19 @@ export const loopingRules: Rule[] = [
             // Only check error events
             if (event.type !== 'error') return null;
 
-            // Look at last 8 events for repeated error signatures
-            const window = [...recentEvents.slice(-7), event];
+            // Look at last 10 events for repeated error signatures
+            const window = [...recentEvents.slice(-9), event];
             const currentErrorSig = (event.rawSnippet ?? '').slice(0, 100);
             if (!currentErrorSig) return null;
 
-            // Count errors with the same signature
+            // Count errors with the same signature (need 3+ to flag)
             const matchingErrors = window.filter(
                 (e) =>
                     e.type === 'error' &&
                     (e.rawSnippet ?? '').slice(0, 100) === currentErrorSig
             );
 
-            if (matchingErrors.length < 2) return null;
+            if (matchingErrors.length < 3) return null;
 
             return {
                 id: crypto.randomUUID(),
@@ -99,13 +100,15 @@ export const loopingRules: Rule[] = [
                     ? Math.max(...state.progressMarkers.map((p) => p.sequence))
                     : 0;
             const eventsSinceProgress = event.sequence - lastProgressSeq;
-            if (eventsSinceProgress < 20) return null;
+
+            // Only flag after 50+ events with no progress (real sessions are verbose)
+            if (eventsSinceProgress < 50) return null;
 
             return {
                 id: crypto.randomUUID(),
                 category: 'looping',
                 ruleId: 'lp-no-progress',
-                severity: 'high',
+                severity: 'medium',
                 title: 'No Progress',
                 reason: `No progress marker in the last ${eventsSinceProgress} events — the agent may be stalled.`,
                 suggestedAction:
@@ -126,3 +129,4 @@ export const loopingRules: Rule[] = [
     //   // Jaccard similarity on action params within sliding window
     // },
 ];
+

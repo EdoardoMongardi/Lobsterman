@@ -56,13 +56,13 @@ export interface ProgressMarker {
   timestamp: number;
   description: string;
   type:
-    | 'file_created'
-    | 'file_edited'
-    | 'build_passed'
-    | 'test_passed'
-    | 'command_succeeded'
-    | 'patch_applied'
-    | 'other';
+  | 'file_created'
+  | 'file_edited'
+  | 'build_passed'
+  | 'test_passed'
+  | 'command_succeeded'
+  | 'patch_applied'
+  | 'other';
 }
 
 export interface RedFlag {
@@ -112,12 +112,12 @@ export interface Rule {
 
 // ─── API Response Types ───
 
-export type WatchtowerMode = 'demo' | 'file';
+export type LobstermanMode = 'demo' | 'file' | 'telegram';
 
 export interface DashboardResponse {
   state: SupervisorState;
   updatedAt: number;
-  mode: WatchtowerMode;
+  mode: LobstermanMode;
 }
 
 export interface EventsResponse {
@@ -134,3 +134,32 @@ export interface EventSourceAdapter {
   stop: () => void;
   isRunning: () => boolean;
 }
+
+// ─── Engine Callback Types ───
+
+export type OnRuleTriggered = (flag: RedFlag, event: NormalizedEvent) => void;
+export type OnRiskChanged = (oldLevel: RiskLevel, newLevel: RiskLevel, flags: RedFlag[]) => void;
+export type OnSessionStart = (sessionId: string, task: string) => void;
+export type OnSessionEnd = (sessionId: string, stats: SupervisorState['stats']) => void;
+
+export interface EngineCallbacks {
+  onRuleTriggered?: OnRuleTriggered;
+  onRiskChanged?: OnRiskChanged;
+  onSessionStart?: OnSessionStart;
+  onSessionEnd?: OnSessionEnd;
+}
+
+// ─── Operator Decision Types ───
+
+export type OperatorDecisionType = 'acknowledged' | 'flagged_for_review' | 'pause_requested' | 'stop_requested';
+
+export interface OperatorDecision {
+  id: string;
+  timestamp: number;
+  decision: OperatorDecisionType;
+  ruleId?: string;
+  flagId?: string;
+  userId?: string;
+  note?: string;
+}
+

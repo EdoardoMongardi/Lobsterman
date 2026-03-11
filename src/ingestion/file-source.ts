@@ -5,8 +5,8 @@
  * Handles the file not existing yet, partial lines, and graceful recovery.
  *
  * Usage:
- *   WATCHTOWER_MODE=file
- *   WATCHTOWER_SOURCE_FILE=./path/to/session.jsonl
+ *   LOBSTERMAN_MODE=file
+ *   LOBSTERMAN_SOURCE_FILE=./path/to/session.jsonl
  */
 
 import * as fs from 'fs';
@@ -21,22 +21,38 @@ export class FileEventSource implements EventSourceAdapter {
     private intervalId: NodeJS.Timeout | null = null;
     private running: boolean = false;
     private partialLine: string = '';
+    private skipExisting: boolean;
 
-    constructor(filePath: string, pollInterval: number = 1000) {
+    constructor(filePath: string, pollInterval: number = 1000, skipExisting: boolean = false) {
         this.filePath = filePath;
         this.pollInterval = pollInterval;
+        this.skipExisting = skipExisting;
     }
 
     start(callback: EventCallback): void {
         if (this.running) return;
 
         this.running = true;
-        this.lastReadPosition = 0;
         this.partialLine = '';
+
+        // In skipExisting mode, skip to near the end of the file
+        // Read only the last TAIL_BYTES to catch recent activity without replaying everything
+        const TAIL_BYTES = 50_000; // ~50KB, enough for recent events
+        if (this.skipExisting && fs.existsSync(this.filePath)) {
+            const stat = fs.statSync(this.filePath);
+            if (stat.size > TAIL_BYTES) {
+                this.lastReadPosition = stat.size - TAIL_BYTES;
+                console.log(`[FileEventSource] Skipping to last ${TAIL_BYTES} bytes (file: ${stat.size} bytes)`);
+            } else {
+                this.lastReadPosition = 0;
+            }
+        } else {
+            this.lastReadPosition = 0;
+        }
 
         console.log(`[FileEventSource] Tailing ${this.filePath} (poll: ${this.pollInterval}ms)`);
 
-        // Immediately read any existing content
+        // Always process available content from start position
         this.poll(callback);
 
         // Then poll on interval for new lines

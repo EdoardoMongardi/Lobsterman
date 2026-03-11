@@ -73,7 +73,7 @@ export const contextDangerRules: Rule[] = [
         id: 'cd-long-run-no-summary',
         category: 'context_danger',
         name: 'Long Run Without Summary',
-        enabled: true,
+        enabled: false, // Disabled: too noisy, overlaps with lp-no-progress
         evaluate(
             event: NormalizedEvent,
             state: SupervisorState,
