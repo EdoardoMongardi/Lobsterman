@@ -80,8 +80,8 @@ export const riskyActionRules: Rule[] = [
             _state: SupervisorState,
             _recentEvents: NormalizedEvent[]
         ): RedFlag | null {
-            // Only check tool_call and tool_result events — NOT assistant messages
-            if (event.type !== 'tool_call' && event.type !== 'tool_result') return null;
+            // Only check tool_call events — tool_result is just confirmation output
+            if (event.type !== 'tool_call') return null;
 
             const target = event.target ?? '';
             const snippet = event.rawSnippet ?? '';
