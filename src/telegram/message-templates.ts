@@ -46,10 +46,18 @@ export function formatRuleWarning(flag: RedFlag, event: NormalizedEvent): string
     const displayTarget = event.target
         ? event.target.replace(/\n/g, ' ').slice(0, 60) + (event.target.length > 60 ? '...' : '')
         : undefined;
-    // Truncate reason similarly
-    const displayReason = flag.reason
-        ? flag.reason.replace(/\n/g, ' ').slice(0, 120) + (flag.reason.length > 120 ? '...' : '')
-        : undefined;
+    // Truncate reason (may be multi-line from composed alerts)
+    let displayReason: string | undefined;
+    if (flag.reason) {
+        const reasonLines = flag.reason.split('\n').filter(Boolean);
+        if (reasonLines.length > 1) {
+            // Composed: show first reason + count
+            const first = reasonLines[0].slice(0, 100) + (reasonLines[0].length > 100 ? '...' : '');
+            displayReason = `${first} (+${reasonLines.length - 1} more)`;
+        } else {
+            displayReason = flag.reason.slice(0, 120) + (flag.reason.length > 120 ? '...' : '');
+        }
+    }
 
     const lines = [
         `${emoji} *${escMd(flag.title)}* ${severity}`,

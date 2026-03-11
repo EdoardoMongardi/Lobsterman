@@ -45,25 +45,34 @@ export function initTelegramBot(): EngineCallbacks | null {
     bot.on('callback_query', async (query) => {
         if (!query.data) return;
 
-        const [action, ruleId] = query.data.split(':');
+        try {
+            const colonIdx = query.data.indexOf(':');
+            const action = colonIdx >= 0 ? query.data.slice(0, colonIdx) : query.data;
+            const ruleId = colonIdx >= 0 ? query.data.slice(colonIdx + 1) : undefined;
 
-        switch (action) {
-            case 'ack':
-                recordDecision('acknowledged', ruleId);
-                await bot!.answerCallbackQuery(query.id, { text: 'Acknowledged' });
-                break;
-            case 'flag':
-                recordDecision('flagged_for_review', ruleId);
-                await bot!.answerCallbackQuery(query.id, { text: 'Flagged for review' });
-                break;
-            case 'dashboard':
-                await bot!.answerCallbackQuery(query.id, {
-                    text: 'Opening dashboard...',
-                    url: dashboardUrl,
-                });
-                break;
-            default:
-                await bot!.answerCallbackQuery(query.id, { text: 'Unknown action' });
+            switch (action) {
+                case 'ack':
+                    recordDecision('acknowledged', ruleId);
+                    await bot!.answerCallbackQuery(query.id, { text: 'Acknowledged' });
+                    break;
+                case 'flag':
+                    recordDecision('flagged_for_review', ruleId);
+                    await bot!.answerCallbackQuery(query.id, { text: 'Flagged for review' });
+                    break;
+                case 'dashboard':
+                    await bot!.answerCallbackQuery(query.id, {
+                        text: 'Opening dashboard...',
+                        url: dashboardUrl,
+                    });
+                    break;
+                default:
+                    await bot!.answerCallbackQuery(query.id, { text: 'Unknown action' });
+            }
+        } catch (err) {
+            console.error('[Lobsterman] callback_query handler error:', err);
+            try {
+                await bot!.answerCallbackQuery(query.id, { text: 'Error processing action' });
+            } catch { /* suppress */ }
         }
     });
 
