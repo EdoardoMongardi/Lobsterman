@@ -6,6 +6,7 @@
  */
 
 import { RedFlag, RiskLevel, NormalizedEvent, SupervisorState } from '../core/types';
+import { VerificationResult } from '../verification/types';
 
 // ─── Emoji helpers ───
 
@@ -130,4 +131,36 @@ export function formatSessionEnd(
         `📊 Events: ${stats.totalEvents} \\| Risk: ${risk} ${escMd(riskLevel.toUpperCase())}`,
         `⚠️ Warnings: ${stats.largeOutputCount + stats.repeatedActionCount + stats.riskyActionCount}`,
     ].filter(Boolean).join('\n');
+}
+
+// ─── Verification result ───
+
+export function formatVerificationResult(result: VerificationResult): string {
+    const shortPath = result.targetPath.split('/').slice(-2).join('/');
+    const typeLabel = result.type === 'file_write' ? 'Write' : 'Delete';
+
+    if (result.status === 'verified') {
+        const sizeInfo = result.fileSize ? ` (${result.fileSize} bytes)` : '';
+        return [
+            `✅ *Verified ${escMd(typeLabel)}*`,
+            ``,
+            `${escMd(shortPath)}${escMd(sizeInfo)}`,
+        ].join('\n');
+    }
+
+    if (result.status === 'mismatch') {
+        const detail = result.detail.length > 120
+            ? result.detail.slice(0, 120) + '...'
+            : result.detail;
+        return [
+            `⚠️ *Verification Mismatch*`,
+            ``,
+            `Type: ${escMd(typeLabel)}`,
+            `Path: ${escMd(shortPath)}`,
+            `_${escMd(detail)}_`,
+        ].join('\n');
+    }
+
+    // unverifiable — log only, no Telegram message
+    return '';
 }

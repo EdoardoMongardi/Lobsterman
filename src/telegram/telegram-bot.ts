@@ -14,8 +14,11 @@ import {
     formatRiskChange,
     formatSessionStart,
     formatSessionEnd,
+    formatVerificationResult,
 } from './message-templates';
 import { recordDecision } from './operator-intent';
+import { registerVerificationCallback } from '../verification/verifier-engine';
+import type { VerificationResult } from '../verification/types';
 import type { RedFlag, RiskLevel, NormalizedEvent, SupervisorState, EngineCallbacks } from '../core/types';
 
 let bot: TelegramBot | null = null;
@@ -89,6 +92,9 @@ export function initTelegramBot(): EngineCallbacks | null {
 
     console.log(`[Lobsterman] Telegram bot started - sending to chat ${chatId}`);
 
+    // Register verification callback for Phase 8A
+    registerVerificationCallback(handleVerificationResult);
+
     // Return engine callbacks that send Telegram messages
     return {
         onRuleTriggered: handleRuleTriggered,
@@ -120,6 +126,13 @@ async function handleRiskChanged(
 async function handleSessionStart(sessionId: string, task: string): Promise<void> {
     const text = formatSessionStart(sessionId, task);
     await sendMarkdown(text);
+}
+
+async function handleVerificationResult(result: VerificationResult): Promise<void> {
+    const text = formatVerificationResult(result);
+    if (text) {
+        await sendMarkdown(text);
+    }
 }
 
 /**
