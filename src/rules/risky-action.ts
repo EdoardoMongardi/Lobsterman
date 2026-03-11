@@ -1,4 +1,5 @@
 import { Rule, NormalizedEvent, SupervisorState, RedFlag } from '../core/types';
+import { extractFileOpFromCommand } from '../core/exec-path-extractor';
 
 const SENSITIVE_FILE_PATTERNS = [
     /\.env($|\.)/i,
@@ -46,22 +47,34 @@ export const riskyActionRules: Rule[] = [
             _state: SupervisorState,
             _recentEvents: NormalizedEvent[]
         ): RedFlag | null {
-            // Only check events with a target path
-            if (!event.target) return null;
+            if (!PROJECT_ROOT) return null; // Rule disabled if no root set
 
-            // Only check absolute paths
-            if (!event.target.startsWith('/')) return null;
+            let resolvedPath: string | null = null;
 
-            // Check if path is outside project root
-            if (event.target.startsWith(PROJECT_ROOT)) return null;
+            // Case 1: direct file tool with clean absolute path
+            if (event.target && event.target.startsWith('/')) {
+                resolvedPath = event.target;
+            }
 
+            // Case 2: exec command — extract path from command string
+            if (!resolvedPath && event.type === 'tool_call' && event.target) {
+                const op = extractFileOpFromCommand(event.target);
+                if (op) resolvedPath = op.path;
+            }
+
+            if (!resolvedPath) return null;
+
+            // Only fire if path is outside project root
+            if (resolvedPath.startsWith(PROJECT_ROOT)) return null;
+
+            const shortPath = resolvedPath.split('/').slice(-2).join('/');
             return {
                 id: crypto.randomUUID(),
                 category: 'risky_action',
                 ruleId: 'ra-path-outside-root',
                 severity: 'critical',
                 title: 'Path Outside Project Root',
-                reason: `Action targets ${event.target} which is outside the project root ${PROJECT_ROOT}.`,
+                reason: `Agent is acting on ${shortPath} which is outside the project root.`,
                 suggestedAction:
                     'STOP immediately. The agent is modifying files outside the project.',
                 triggeredAt: event.timestamp,
