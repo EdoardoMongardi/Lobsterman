@@ -18,6 +18,7 @@ import {
 } from './message-templates';
 import { recordDecision } from './operator-intent';
 import { registerVerificationCallback } from '../verification/verifier-engine';
+import { initSessionSummary } from './session-summary';
 import type { VerificationResult } from '../verification/types';
 import type { RedFlag, RiskLevel, NormalizedEvent, SupervisorState, EngineCallbacks } from '../core/types';
 
@@ -94,6 +95,9 @@ export function initTelegramBot(): EngineCallbacks | null {
 
     // Register verification callback for Phase 8A
     registerVerificationCallback(handleVerificationResult);
+
+    // Register session summary sender for Phase 7B-lite
+    initSessionSummary(sendMarkdown);
 
     // Return engine callbacks that send Telegram messages
     return {

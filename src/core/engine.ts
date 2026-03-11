@@ -12,6 +12,7 @@ import { findLatestSession, SessionWatcher } from '../ingestion/session-watcher'
 import { initTelegramBot, stopTelegramBot } from '../telegram/telegram-bot';
 import { loadDecisions, clearDecisions } from '../telegram/operator-intent';
 import { processVerification, clearVerifications } from '../verification/verifier-engine';
+import { onEventReceived, resetSessionSummary } from '../telegram/session-summary';
 import { DEMO_TASK, DEMO_CONSTRAINTS } from '../lib/demo-scenario';
 import type { EventSourceAdapter } from './types';
 
@@ -190,6 +191,7 @@ function handleEvent(event: NormalizedEvent): void {
     // 6b. Run verification pipeline (only if not warming up)
     if (!warmingUp) {
         processVerification(event);
+        onEventReceived(); // Reset idle timer for session summary
     }
 
     // 7. Update phase based on risk
@@ -286,6 +288,7 @@ function initializeSource(): void {
             stateStore.reset();
             clearAlertHistory(); // Fresh session = fresh alert state
             clearVerifications(); // Clear pending verifications
+            resetSessionSummary(); // Reset idle timer and summary state
             resetSequence();     // Event numbers restart from 1
 
             if (isFirstSession) {
@@ -316,6 +319,7 @@ export function resetEngine(): void {
     clearDecisions();
     clearAlertHistory();
     clearVerifications();
+    resetSessionSummary();
     stateStore.reset();
     initializeSource();
     console.log('[Lobsterman] Reset complete — source restarted');
