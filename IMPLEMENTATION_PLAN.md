@@ -522,3 +522,297 @@ These are deferred because:
 - ShellCommandVerifier involves semantic inference (matching agent text to exit codes) — risk of false positives
 - GitDiffVerifier and BuildArtifactVerifier are straightforward but lower priority than file ops
 - Phase 8A must prove the verification pattern works before expanding scope
+
+---
+
+# Phase 9 — Validation, Hardening, and Release Prep
+
+> **Goal**: Turn Lobsterman v1 from "feature complete" to "stable, validated, demo-ready, and suitable for alpha testing."
+
+This phase does **not** add major runtime features. It focuses on proving correctness, reducing rough edges, and preparing for external use.
+
+> **Assumption**: The currently enabled rule set is the one present in the codebase at Phase 9 start. Any fixture expectations must be aligned to the actual enabled rule set, not older plan text.
+
+## Phase 9 Non-Goals
+
+- No new major runtime features
+- No 7C (gateway control) implementation by default
+- No 8B (extended verification) expansion by default
+- No task segmentation within sessions
+- No redesign of the core session-level model
+
+---
+
+## A. Hardening / Bug Sweep
+
+Systematic review of each v1 layer. Each item specifies what to check, which files are involved, and what regressions we guard against.
+
+### A1. Telegram Layer
+
+| Check | Files | Regression guarded |
+|---|---|---|
+| **Composed alert dedup**: when 2+ rules fire on same event, exactly one Telegram message is sent | `engine.ts` `composeFlags` | Duplicate alerts from composed vs individual dispatch |
+| **Cooldown boundary**: rapid-fire events with same `ruleId + target` → only first alert within window | `engine.ts` `shouldAlert` | Alert spam from high-frequency events |
+| **Idle summary single-fire**: after 60s idle, exactly one interim summary sent; no duplicates | `session-summary.ts` `handleIdleTimeout`, `sentIdleSummary` | Double-fire from timer race conditions |
+| **Session resume after idle**: new event after idle summary → `sentIdleSummary` resets → new idle period can trigger new summary | `session-summary.ts` `onEventReceived` | Stuck `sentIdleSummary=true` preventing future summaries |
+| **Operator button robustness**: unknown `callback_data` formats → handled gracefully, no crash | `telegram-bot.ts` `callback_query` handler | Crash from stale/malformed button presses |
+| **MarkdownV2 escaping**: special characters in task text, paths, or reasons → no Telegram parse errors | `message-templates.ts`, `session-summary.ts` `escMd` | Telegram API rejection from unescaped characters |
+
+### A2. Verification Layer
+
+| Check | Files | Regression guarded |
+|---|---|---|
+| **Pending lifecycle**: every `tool_call` verification matches to exactly one `tool_result`; no orphans | `verifier-engine.ts` `findMatchingPending` | Mismatched verification results |
+| **Expiration at 30s**: pending entries with no matching result → status `expired`, cleaned up | `verifier-engine.ts` `expireStale` | Memory leak from abandoned verifications |
+| **Root boundary enforcement**: paths outside `LOBSTERMAN_PROJECT_ROOT` → log `verification_skipped_out_of_scope`, no Telegram verification message | `verifier-engine.ts` `isInsideProjectRoot` | ✅ Verified messages for outside-root paths |
+| **Mismatch false-positive review**: delete via Trash → original path gone → should count as `verified` for v1 inside-root delete semantics. False `⚠️ Mismatch` when the original path is removed (e.g. moved to Trash) even though delete semantics are satisfied. | `file-delete-verifier.ts` | False mismatch for legitimate Trash operations |
+| **Cumulative counter consistency**: `recordVerificationForSummary` called for every verification result, persists across idle periods | `session-summary.ts`, `telegram-bot.ts` | Verification counts reset mid-session |
+
+### A3. State / Persistence Layer
+
+| Check | Files | Regression guarded |
+|---|---|---|
+| **Restart correctness**: stop → restart Lobsterman → decisions.jsonl reloaded, session re-detected | `operator-intent.ts` `loadDecisions`, `engine.ts` `initializeSource` | Lost decisions or missed session after restart |
+| **Session switch isolation**: new session → `stateStore.reset()`, `clearVerifications()`, `resetSessionSummary()`, `clearAlertHistory()`, `resetSequence()` all called | `engine.ts` session watcher callback | Cross-session state leakage (old flags, old verifications) |
+| **Persisted state vs in-memory consistency**: `data/session.json` matches `stateStore.getState()` after every persist cycle | `state-store.ts` `persistThrottled` | Dashboard showing stale persisted state |
+| **Event sequence reset**: session switch → sequence restarts from 1 | `event-normalizer.ts` `resetSequence` | Confusing event numbers across sessions |
+
+### A4. Dashboard / UX Layer
+
+| Check | Files | Regression guarded |
+|---|---|---|
+| **Dashboard state matches Telegram**: risk level, flag counts, event counts consistent | `route.ts`, all dashboard components | User sees conflicting info between dashboard and Telegram |
+| **Flag display correctness**: active flags shown with correct severity icons | Dashboard components | Wrong severity color/icon mapping |
+| **Cumulative vs live scope labels**: report card clearly separates "Cumulative session stats" from "Verified (since monitoring started)" | `session-summary.ts` `buildSummary` | Users comparing incomparable numbers |
+
+### Hardening Deliverable
+
+> **Step 25** 🟢: Sweep each table above. For each item, verify correctness by code review and/or quick manual test. Fix any bugs found. Commit fixes atomically per layer.
+
+---
+
+## B. Lean Systematic Verification Pipeline
+
+### B1. Unit / Logic Tests
+
+Create `tests/` directory with focused test files. Use Node.js built-in `node:test` runner (zero dependencies).
+
+| Test file | Priority | What it tests | Key assertions |
+|---|---|---|---|
+| `tests/alert-composition.test.ts` | P0 | `composeFlags()` in engine.ts | Single flag → passthrough; 2 flags → merged title, highest severity wins; 3+ flags → correct ordering |
+| `tests/cooldown.test.ts` | P0 | `shouldAlert()` dedup logic | Same ruleId+target within window → suppressed; different targets → both fire; window expires → fires again |
+| `tests/exec-path-extractor.test.ts` | P0 | `extractFileOpFromCommand()` | osascript delete → correct path; `cat > path` → write; `rm path` → delete; `$HOME` resolution; no match → null |
+| `tests/root-boundary.test.ts` | P0 | `isInsideProjectRoot()` + `ra-path-outside-root` rule | Inside root → pass; outside root → flag; no root set → skip |
+| `tests/verification-lifecycle.test.ts` | P0 | Pending verification queue | tool_call → queued; tool_result → matched → verified/mismatch; timeout → expired; outside root → skipped |
+| `tests/summary-trigger.test.ts` | P0 | Idle timer and cumulative counters | Events reset timer; 60s idle → fires once; resume → resets; new idle → fires again; counters cumulative |
+| `tests/progress-marker.test.ts` | P1 (optional) | `detectProgressMarker()` | exec tool_result → progress; user_message → progress; error → not progress. Lower priority — not core v1 trust semantics. |
+
+> **Step 26** 🟢: Implement the P0 test files (6 required, 1 optional). Run with `node --test tests/`. All P0 tests must pass.
+
+### B2. Scenario Replay Validation
+
+Create `tests/fixtures/` with static event transcript files. Each fixture is a `.jsonl` file replayed through the engine using a replay harness written as `tests/replay.test.ts` (also runs under `node:test` for consistency).
+
+| Fixture name | Input scenario | Expected outcomes |
+|---|---|---|
+| `clean-write-session.jsonl` | User sends task → agent writes file inside root → completes | ✅ Verified Write, Risk: LOW, 0 warnings |
+| `delete-inside-root.jsonl` | User asks delete → agent deletes file inside root | ✅ Verified Delete, `ra-sensitive-destructive` fires |
+| `delete-outside-root.jsonl` | Agent deletes file outside root | `ra-path-outside-root` + `ra-sensitive-destructive` composed, no verification message, `verification_skipped_out_of_scope` logged |
+| `outside-root-destructive-composed.jsonl` | Single event triggers both `ra-path-outside-root` and `ra-sensitive-destructive` | State has both flags trackable; Telegram sends exactly 1 composed alert; risk escalation handled separately |
+| `retry-loop.jsonl` | Agent calls same tool 4+ times on same target | `lp-repeated-tool-target` fires, Risk escalates |
+| `missing-tool-result.jsonl` | tool_call with no matching tool_result within 30s | Pending verification expires, status = `expired` |
+| `idle-then-resume.jsonl` | Events → 60s gap → more events | First idle summary sent; after resume, new events reset timer; second idle → second summary |
+| `warmup-then-live.jsonl` | 50 historical events (warmup) + 5 live events | Stats cumulative (55 events), flags from warmup in cumulative counts, alerts only dispatched for live events, verifications only for live |
+
+> **Step 27** 🟢: Create the 8 fixtures and the replay harness as `tests/replay.test.ts`. Run with `node --test tests/replay.test.ts`. All scenarios must pass.
+
+### B3. Manual Live Validation Checklist
+
+A checklist to run before demos or alpha release.
+
+```
+LOBSTERMAN v1 — MANUAL VALIDATION CHECKLIST
+
+Setup:
+□ .env.local has TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LOBSTERMAN_PROJECT_ROOT
+□ npm run dev starts cleanly
+□ Session watcher detects active OpenClaw session
+
+Telegram:
+□ Session start message appears in Telegram
+□ Ask OpenClaw to write file inside root → ✅ Verified Write
+□ Ask OpenClaw to delete file inside root → ✅ Verified Delete + 🚨 Destructive
+□ Ask OpenClaw to delete file outside root → composed 🚨 alert (no verification)
+□ Press ✅ Acknowledged button → "Decision recorded" response
+□ Press 🚩 Flag for Review button → "Decision recorded" response
+□ Wait 60s idle → interim report card appears with correct stats
+
+Summary accuracy:
+□ Session ID matches (first 8 chars)
+□ Latest user request shows clean text (not raw JSON)
+□ Events, warnings, risk are cumulative
+□ Verifications labeled "(since monitoring started)"
+□ Peak Risk reflects highest level reached
+
+Dashboard:
+□ http://localhost:3000 loads
+□ Risk level matches Telegram
+□ Recent events list is populated
+□ Active flags shown correctly
+
+Recovery:
+□ Stop npm run dev → restart → decisions.jsonl preserved
+□ New OpenClaw session → Lobsterman resets and picks up new session
+```
+
+> **Step 28** 🔴 HUMAN: Run the full checklist above. Record pass/fail for each item.
+
+---
+
+## C. Metrics / Success Criteria
+
+| # | Criterion | Measurement |
+|---|---|---|
+| C1 | **Alert composition correctness** | Multi-rule events produce exactly 1 Telegram message (tested in B1 + B2) |
+| C2 | **Cooldown suppression works** | Rapid same-target events → at most 1 alert per cooldown window (tested in B1) |
+| C3 | **Outside-root containment** | No `✅ Verified` messages for paths outside `LOBSTERMAN_PROJECT_ROOT` (tested in B2) |
+| C4 | **Verification resolution** | Pending → verified/mismatch/expired, no stuck entries (tested in B1 + B2) |
+| C5 | **Summary non-duplication** | One idle summary per idle period, resets on resume (tested in B1) |
+| C6 | **Persistence across restart** | `decisions.jsonl` survives restart, state is reloaded (manual checklist B3) |
+| C7 | **All unit tests pass** | `node --test tests/` → 0 failures |
+| C8 | **All scenario replays pass** | `node --test tests/replay.test.ts` → all 8 scenarios green |
+| C9 | **Manual checklist complete** | All items in B3 checked off by human |
+| C10 | **Build clean** | `npx tsc --noEmit` → 0 errors |
+
+---
+
+## D. Documentation / Packaging
+
+### D1. README.md
+
+> **Step 29** 🟢: Rewrite `README.md` with the following sections:
+
+1. **What is Lobsterman** — one-paragraph elevator pitch
+2. **Who it's for** — operators supervising AI coding agents
+3. **Trust model**:
+   - Level 0: Agent self-report
+   - Level 1: Gateway transcript / runtime monitoring
+   - Level 2: Independent result verification
+4. **Human response layer** — operator acknowledgement / flagging as audit metadata (intentionally not a trust level)
+5. **What it detects** — risky actions, looping, context danger, file operations
+6. **Quick start** — env vars, `npm install`, `npm run dev`
+7. **Architecture** — brief system diagram (ASCII or Mermaid)
+8. **Current boundaries / non-goals** — see D4
+
+### D2. Architecture Overview
+
+> **Step 30** 🟢: Create `docs/architecture.md`:
+
+```
+OpenClaw JSONL → session-watcher → file-source → event-normalizer
+    → state-store → rule-engine → [flags] → alert-composition → telegram-bot
+    → state-updater                        → verification-engine → telegram-bot
+                                           → session-summary → telegram-bot
+    Dashboard ← state-store (API routes)
+    Persistence: data/session.json, data/events.jsonl, data/decisions.jsonl
+```
+
+Cover each layer in 2–3 sentences: responsibility, key files, data flow.
+
+### D3. Demo Guide
+
+> **Step 31** 🟢: Create `docs/demo-guide.md` — a step-by-step demo script:
+
+1. Start Lobsterman + show Telegram bot
+2. Send a safe task to OpenClaw (write a poem) → show verified write
+3. Send a risky task (delete files outside root) → show composed alert + operator buttons
+4. Acknowledge the alert → show decision recorded
+5. Wait for idle summary → show the report card
+6. Show dashboard at localhost:3000
+7. Show persistence (restart, decisions survive)
+
+Estimated demo time: 5–7 minutes.
+
+### D4. Known Limitations
+
+> **Step 32** 🟢: Create `docs/known-limitations.md`:
+
+- Session-level monitoring only; no per-task segmentation in v1
+- Level 2 verification limited to file write/delete inside `LOBSTERMAN_PROJECT_ROOT`
+- No universal side-effect verification (network, database, system config)
+- No real control plane in v1 (acknowledged ≠ paused/stopped)
+- Warmup stats are cumulative but verification is live-only
+- Single-operator model (one Telegram chat)
+- Depends on OpenClaw JSONL transcript format
+
+---
+
+## E. Alpha Release Readiness
+
+### Release Readiness Checklist
+
+```
+LOBSTERMAN v1 — RELEASE READINESS
+
+Stability:
+□ No known crash-on-startup bugs
+□ npm run dev runs for 30+ minutes without errors
+□ Session switch handled cleanly (no stale state)
+
+Validation:
+□ All unit tests pass (C7)
+□ All scenario replays pass (C8)
+□ Manual checklist passed (C9)
+□ Build clean (C10)
+
+Documentation:
+□ README.md complete (D1)
+□ Architecture overview written (D2)
+□ Demo guide written (D3)
+□ Known limitations documented (D4)
+
+Known issues policy:
+□ All known bugs filed as GitHub issues with [v1] label
+□ No critical/high severity bugs open
+□ Medium/low bugs documented in known-limitations.md if not fixed
+□ All currently known false-positive / ambiguous alert cases are
+  documented and understood (critical for a monitoring product)
+
+Demo confidence:
+□ Demo guide successfully executed end-to-end
+□ No embarrassing UI/UX issues in dashboard
+□ Telegram messages render correctly (no MarkdownV2 errors)
+□ Report card shows accurate cumulative stats
+```
+
+> **Step 33** 🔴 HUMAN: Run the release readiness checklist. All items must pass before declaring v1 alpha-ready.
+
+---
+
+## Phase 9 Summary
+
+| Step | Type | Deliverable |
+|---|---|---|
+| 25 | 🟢 Code | Hardening bug sweep (A1–A4) |
+| 26 | 🟢 Code | Unit/logic tests (6 required + 1 optional) |
+| 27 | 🟢 Code | Scenario replay fixtures + harness (8 fixtures) |
+| 28 | 🔴 Human | Manual live validation |
+| 29 | 🟢 Docs | README.md rewrite |
+| 30 | 🟢 Docs | Architecture overview |
+| 31 | 🟢 Docs | Demo guide |
+| 32 | 🟢 Docs | Known limitations |
+| 33 | 🔴 Human | Release readiness sign-off |
+
+**Phase 9 complete when**: All 🟢 steps done, both 🔴 HUMAN checklists passed, all C1–C10 criteria met.
+
+---
+
+## Phase 9 Deliverable Narrative
+
+At the end of Phase 9, Lobsterman v1 should be:
+
+- **Stable** under real OpenClaw sessions
+- **Protected** against key semantic regressions
+- **Documented** well enough for demo / alpha users
+- **Packaged** as an alpha-ready operator-facing runtime watchdog
+
