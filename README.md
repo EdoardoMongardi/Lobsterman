@@ -1,4 +1,4 @@
-# Lobsterman
+# 🦞 Lobsterman
 
 **AI Agent Runtime Safety & Audit Layer**
 
@@ -6,35 +6,35 @@ Runtime monitoring · Deterministic guardrails · Human-in-the-loop · Evidence-
 
 Lobsterman monitors OpenClaw agent sessions in real time via Telegram DM and web dashboard. It raises warnings when it detects context danger, looping behavior, or risky actions — before they become expensive failures.
 
-> Built on gateway-level event streams, not agent self-reports. [Why this matters →](./IMPLEMENTATION_PLAN.md#phase-8-execution-verification-layer-future)
+> Built on gateway-level event streams, not agent self-reports. [Why this matters →](#trust-model)
+
+## Who Is This For?
+
+- **Operators** running AI coding agents on their own machines who want visibility
+- **Students/researchers** building with agent frameworks who need guardrails
+- **Teams** evaluating agent trustworthiness through behavioral evidence
 
 ## Quick Start
 
 ```bash
+# Clone and install
+git clone https://github.com/EdoardoMongardi/Lobsterman.git
+cd Lobsterman
 npm install
+
+# Demo mode — see it work immediately
 npm run dev
-# Open http://localhost:3000 — demo mode starts automatically
+# Open http://localhost:3000
+
+# Telegram mode — live monitoring
+export LOBSTERMAN_MODE=telegram
+export TELEGRAM_BOT_TOKEN=your_bot_token
+export TELEGRAM_CHAT_ID=your_chat_id
+export LOBSTERMAN_PROJECT_ROOT=/path/to/monitored/project
+npm run dev
 ```
 
-## Modes
-
-| Mode | What | Set via |
-|---|---|---|
-| `demo` | Pre-scripted 40-event scenario | Default |
-| `file` | Monitor a specific JSONL transcript | `LOBSTERMAN_MODE=file` |
-| `telegram` | Auto-detect sessions + Telegram DM alerts | `LOBSTERMAN_MODE=telegram` |
-
-## What You'll See (Demo Mode)
-
-The demo simulates an agent refactoring an auth module:
-
-1. **Events 1–15** — Normal progress. Risk stays **LOW**.
-2. **Events 16–22** — **Context Danger**. Agent reads huge files. Warnings appear.
-3. **Events 23–30** — **Looping**. Agent retries builds with the same error. Escalates to **CRITICAL**.
-4. **Events 31–35** — **Risky Action**. Agent edits files outside project, touches `.env`, runs `rm -rf`.
-5. **Events 36–40** — Continued escalation. Intervention panel recommends **STOP**.
-
-## MVP Rules (6 active)
+## What It Detects
 
 | Category | Rule | Severity |
 |---|---|---|
@@ -44,6 +44,22 @@ The demo simulates an agent refactoring an auth module:
 | Looping | Same error repeated with retries | Critical |
 | Risky Action | File path outside project root | Critical |
 | Risky Action | Sensitive file or destructive command | High |
+
+Multi-rule events are **composed into a single alert** (e.g., "Destructive Command — Outside Project Root") to prevent spam.
+
+## Trust Model
+
+Lobsterman operates at three trust levels:
+
+| Level | Source | Status |
+|---|---|---|
+| **Level 0** | Agent self-report ("I wrote the file") | ❌ Not trusted — execution hallucination risk |
+| **Level 1** | Gateway transcript / runtime monitoring | ✅ Active — deterministic rule evaluation on real event streams |
+| **Level 2** | Independent result verification | ✅ Active (v1: file write/delete inside project root) |
+
+### Human Response Layer
+
+Operator decisions (acknowledge / flag for review) are captured as audit metadata via Telegram inline buttons. These are **not** a trust level — they are human-in-the-loop accountability records persisted to `data/decisions.jsonl`.
 
 ## Architecture
 
@@ -55,34 +71,48 @@ OpenClaw Gateway ─── JSONL ──→ Lobsterman Engine ──→ Telegram 
                               Rule Pipeline          Operator Intent
                               (deterministic)        (decision capture)
                                     │
+                                    ├──→ Verification Engine (Level 2)
+                                    │
                                     ▼
                               Web Dashboard
                               (deep-dive view)
 ```
 
 - **Engine**: Deterministic rule pipeline — no LLM calls in the hot path
-- **State**: In-memory with throttled persistence
-- **Telegram**: Templated warnings (zero-cost, zero-latency). LLM only for session reports.
+- **Verification**: File write/delete checks after tool execution (inside project root only)
+- **Session Summary**: Cumulative session stats + peak risk level via Telegram
+- **State**: In-memory with throttled persistence to disk
 - **Dashboard**: Next.js + Tailwind, polls every 2 seconds, risk-first layout
 
-### Trust Model
+See [docs/architecture.md](./docs/architecture.md) for the full data flow.
 
-```
-Agent says "I did it"          → Don't trust (execution hallucination risk)
-Gateway logs show it happened  → Trust but verify (Lobsterman Level 2) ← current
-Independent check confirms it  → Verified (Lobsterman Level 3, planned)
-```
+## Modes
+
+| Mode | What | Set via |
+|---|---|---|
+| `demo` | Pre-scripted 40-event scenario | Default |
+| `file` | Monitor a specific JSONL transcript | `LOBSTERMAN_MODE=file` |
+| `telegram` | Auto-detect sessions + Telegram DM alerts | `LOBSTERMAN_MODE=telegram` |
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `LOBSTERMAN_MODE` | `demo` | `demo`, `file`, or `telegram` |
-| `LOBSTERMAN_PROJECT_ROOT` | `/Users/example/project` | For risky action path checks |
+| `LOBSTERMAN_PROJECT_ROOT` | `/Users/example/project` | For risky action path checks + verification boundary |
 | `LOBSTERMAN_SOURCE_FILE` | — | JSONL transcript path (mode=file) |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token (mode=telegram) |
 | `TELEGRAM_CHAT_ID` | — | Your Telegram chat ID (mode=telegram) |
 | `OPENCLAW_STATE_DIR` | `~/.openclaw` | OpenClaw state directory |
+
+## Testing
+
+```bash
+# Run all tests (41 tests: 34 unit + 7 replay scenarios)
+npx tsx --test tests/*.test.ts
+```
+
+Tests use Node.js built-in `node:test` runner. No external test framework dependencies.
 
 ## Project Structure
 
@@ -91,11 +121,9 @@ src/
 ├── app/                    # Next.js pages + API routes
 ├── core/                   # Engine logic
 │   ├── types.ts            # All TypeScript interfaces
-│   ├── engine.ts           # Orchestrator (callbacks + session watcher)
-│   ├── rule-engine.ts      # Rule evaluation pipeline
+│   ├── engine.ts           # Orchestrator + alert composition/cooldown
 │   ├── state-store.ts      # In-memory state + persistence
-│   ├── intervention.ts     # Flags → recommended action
-│   └── ...
+│   └── intervention.ts     # Flags → risk level → recommended action
 ├── rules/                  # Rule implementations
 │   ├── context-danger.ts
 │   ├── looping.ts
@@ -107,9 +135,17 @@ src/
 ├── telegram/               # Telegram bot integration
 │   ├── telegram-bot.ts     # Bot core (long-polling + inline buttons)
 │   ├── message-templates.ts # MarkdownV2 warning templates
+│   ├── session-summary.ts  # Cumulative session report card
 │   └── operator-intent.ts  # Decision capture layer
+├── verification/           # Level 2 execution verification
+│   ├── verifier-engine.ts  # Pending queue + lifecycle
+│   ├── file-write-verifier.ts
+│   └── file-delete-verifier.ts
 ├── components/             # React UI components
 └── lib/                    # Utilities + demo data
+tests/
+├── *.test.ts               # Unit + integration tests (node:test)
+└── fixtures/               # JSONL scenario replay fixtures
 ```
 
 ## What Lobsterman Is NOT
@@ -118,7 +154,17 @@ src/
 - ❌ Not a replacement for OpenClaw's security patches
 - ❌ Not a prompt injection "solution"
 - ❌ Not a substitute for minimum-privilege architecture
+- ❌ Not a control plane — it monitors and alerts, it does not block
+
+## Known Limitations
+
+See [docs/known-limitations.md](./docs/known-limitations.md) for the full list. Key boundaries:
+
+- **Session-level monitoring** — no cross-session correlation
+- **Level 2 verification** limited to file write/delete inside project root
+- **No universal side-effect verification** — network, registry, system state not checked
+- **Depends on OpenClaw JSONL format** — not agent-agnostic (yet)
 
 ## Status
 
-**Phase 7A** — Telegram notifications MVP in progress. See [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for full roadmap.
+**Phase 9** — Validation, hardening, and release prep complete. See [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for full roadmap.
