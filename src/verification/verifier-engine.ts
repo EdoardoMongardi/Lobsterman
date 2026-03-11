@@ -9,6 +9,7 @@
  * Scope: ONLY paths inside LOBSTERMAN_PROJECT_ROOT.
  */
 
+import * as os from 'os';
 import { NormalizedEvent } from '../core/types';
 import {
     PendingVerification,
@@ -20,6 +21,7 @@ import { verifyFileDelete } from './file-delete-verifier';
 import { verifyFileWrite } from './file-write-verifier';
 
 const PROJECT_ROOT = process.env.LOBSTERMAN_PROJECT_ROOT ?? '';
+const HOME_DIR = os.homedir();
 const EXPIRATION_MS = 30_000; // 30 seconds
 
 // ─── Pattern detection ───
@@ -33,21 +35,98 @@ const DELETE_TOOL_NAMES = new Set([
     'Delete', 'delete_file',
 ]);
 
-// For exec commands, check the command string for write/delete intent
-const EXEC_WRITE_PATTERNS = [
-    />\s+\S+/,           // redirect to file
-    /tee\s+/,            // tee to file
-    /cp\s+/,             // copy
-    /echo\s+.*>\s*/,     // echo to file
-];
+const EXEC_TOOLS = new Set(['exec', 'Bash', 'bash', 'run_command', 'Shell']);
 
-const EXEC_DELETE_PATTERNS = [
-    /rm\s+/i,
-    /unlink\s+/i,
-    /trash\s+/i,
-    /osascript[\s\S]*delete/i,
-    /osascript[\s\S]*trash/i,
-];
+// ─── Path resolution helpers ───
+
+function resolveHome(p: string): string {
+    return p
+        .replace(/\$HOME/g, HOME_DIR)
+        .replace(/~/g, HOME_DIR);
+}
+
+/**
+ * Extract file path from exec commands. Returns resolved absolute path or null.
+ */
+function extractPathFromExec(command: string): { type: VerificationType; path: string } | null {
+    // 1. Detect osascript-based delete operations
+    //    Pattern: osascript with "delete" + POSIX path extraction
+    if (/osascript[\s\S]*delete/i.test(command) || /osascript[\s\S]*trash/i.test(command)) {
+        // Try to extract path from: set varName to POSIX path of (path to home folder) & "relative/path"
+        const posixMatch = command.match(
+            /POSIX\s+path\s+of\s+\(path\s+to\s+home\s+folder\)\s*&\s*"([^"]+)"/i
+        );
+        if (posixMatch) {
+            const resolved = HOME_DIR + '/' + posixMatch[1];
+            if (resolved.startsWith(PROJECT_ROOT)) {
+                return { type: 'file_delete', path: resolved };
+            }
+        }
+
+        // Try: set varName to POSIX file "absolute/path"
+        const posixFileMatch = command.match(/POSIX\s+file\s+"([^"]+)"/i);
+        if (posixFileMatch) {
+            const resolved = resolveHome(posixFileMatch[1]);
+            if (resolved.startsWith(PROJECT_ROOT)) {
+                return { type: 'file_delete', path: resolved };
+            }
+        }
+
+        // Try: (POSIX path of (path to desktop folder)) & "relative/"
+        const desktopMatch = command.match(
+            /POSIX\s+path\s+of\s+\(path\s+to\s+desktop\s+folder\)\)\s*&\s*"([^"]+)"/i
+        );
+        if (desktopMatch) {
+            const resolved = HOME_DIR + '/Desktop/' + desktopMatch[1];
+            if (resolved.startsWith(PROJECT_ROOT)) {
+                return { type: 'file_delete', path: resolved };
+            }
+        }
+
+        return null; // osascript but can't extract path, skip verification
+    }
+
+    // 2. Detect shell-based write operations
+    //    Pattern: cat > "path" or echo ... > path or tee path
+
+    // cat > "$HOME/path/file" <<'EOF'  or  cat > /absolute/path
+    const catRedirect = command.match(/cat\s+>\s*"?([^"<\n]+)"?\s*/);
+    if (catRedirect) {
+        const resolved = resolveHome(catRedirect[1].trim());
+        if (resolved.startsWith(PROJECT_ROOT)) {
+            return { type: 'file_write', path: resolved };
+        }
+    }
+
+    // echo "..." > "path"
+    const echoRedirect = command.match(/echo\s+.*>\s*"?([^"<\n]+)"?\s*$/m);
+    if (echoRedirect) {
+        const resolved = resolveHome(echoRedirect[1].trim());
+        if (resolved.startsWith(PROJECT_ROOT)) {
+            return { type: 'file_write', path: resolved };
+        }
+    }
+
+    // printf "..." > "path"
+    const printfRedirect = command.match(/printf\s+.*>\s*"?([^"<\n]+)"?\s*$/m);
+    if (printfRedirect) {
+        const resolved = resolveHome(printfRedirect[1].trim());
+        if (resolved.startsWith(PROJECT_ROOT)) {
+            return { type: 'file_write', path: resolved };
+        }
+    }
+
+    // 3. Detect rm-based delete
+    const rmMatch = command.match(/rm\s+(?:-\w+\s+)*"?([^"<\n\s]+)"?\s*/);
+    if (rmMatch) {
+        const resolved = resolveHome(rmMatch[1].trim());
+        if (resolved.startsWith(PROJECT_ROOT)) {
+            return { type: 'file_delete', path: resolved };
+        }
+    }
+
+    return null;
+}
 
 function detectVerificationType(event: NormalizedEvent): { type: VerificationType; path: string } | null {
     if (event.type !== 'tool_call') return null;
@@ -56,33 +135,17 @@ function detectVerificationType(event: NormalizedEvent): { type: VerificationTyp
     const target = event.target ?? '';
 
     // Direct file tool detection
-    if (WRITE_TOOL_NAMES.has(toolName) && target) {
-        if (!target.startsWith('/') || !target.startsWith(PROJECT_ROOT)) {
-            // Only verify absolute paths inside project root
-            if (target.startsWith(PROJECT_ROOT)) {
-                return { type: 'file_write', path: target };
-            }
-            return null;
-        }
+    if (WRITE_TOOL_NAMES.has(toolName) && target && target.startsWith(PROJECT_ROOT)) {
         return { type: 'file_write', path: target };
     }
 
-    if (DELETE_TOOL_NAMES.has(toolName) && target) {
-        if (target.startsWith(PROJECT_ROOT)) {
-            return { type: 'file_delete', path: target };
-        }
-        return null;
+    if (DELETE_TOOL_NAMES.has(toolName) && target && target.startsWith(PROJECT_ROOT)) {
+        return { type: 'file_delete', path: target };
     }
 
-    // Exec command detection — check target (command string) for patterns
-    if (toolName === 'exec' || toolName === 'Bash' || toolName === 'bash' || toolName === 'run_command') {
-        for (const pattern of EXEC_DELETE_PATTERNS) {
-            if (pattern.test(target)) {
-                // We can't reliably extract the exact file path from exec commands
-                // so we skip verification for exec-based operations
-                return null;
-            }
-        }
+    // Exec command detection — parse command string for file operations
+    if (EXEC_TOOLS.has(toolName) && target) {
+        return extractPathFromExec(target);
     }
 
     return null;
@@ -122,17 +185,14 @@ export function processVerification(event: NormalizedEvent): void {
     // 2. Check if this is a tool_result that matches a pending entry
     if (event.type === 'tool_result' || event.type === 'error') {
         const toolName = event.tool ?? '';
-        // Find the nearest unmatched pending entry for the same tool family
-        const match = findMatchingPending(toolName, event);
+        const match = findMatchingPending(toolName);
 
         if (match) {
             if (event.type === 'error') {
-                // Tool errored — mark as unverifiable
                 match.status = 'unverifiable';
                 match.resolvedAt = Date.now();
                 console.log(`[Verifier] Tool error for ${match.targetPath} — marking unverifiable`);
             } else {
-                // Tool succeeded — run verification
                 match.status = 'ready_to_verify';
                 runVerification(match);
             }
@@ -143,12 +203,9 @@ export function processVerification(event: NormalizedEvent): void {
     expireStale();
 }
 
-function findMatchingPending(toolName: string, event: NormalizedEvent): PendingVerification | null {
-    // Find the oldest 'waiting_for_result' entry whose tool name matches
+function findMatchingPending(toolName: string): PendingVerification | null {
     for (const pv of pending) {
         if (pv.status !== 'waiting_for_result') continue;
-
-        // Match by tool family: if the result tool matches the call tool
         if (isToolMatch(pv.toolName, toolName)) {
             return pv;
         }
@@ -157,14 +214,13 @@ function findMatchingPending(toolName: string, event: NormalizedEvent): PendingV
 }
 
 function isToolMatch(callTool: string, resultTool: string): boolean {
-    // Exact match
     if (callTool === resultTool) return true;
 
-    // Common aliases
     const aliases: Record<string, string[]> = {
         write_to_file: ['write_to_file', 'Write', 'write', 'write_file', 'create_file'],
         replace_file_content: ['replace_file_content', 'Edit', 'edit', 'StrReplace', 'multi_replace_file_content'],
         delete_file: ['delete_file', 'Delete'],
+        exec: ['exec', 'Bash', 'bash', 'run_command', 'Shell'],
     };
 
     for (const group of Object.values(aliases)) {
@@ -189,7 +245,6 @@ function runVerification(pv: PendingVerification): void {
 
     console.log(`[Verifier] ${result.status}: ${result.detail}`);
 
-    // Fire callback
     if (callback) {
         callback(result);
     }
@@ -204,22 +259,15 @@ function expireStale(): void {
             console.log(`[Verifier] Expired: ${pv.type} for ${pv.targetPath} (no tool_result within ${EXPIRATION_MS / 1000}s)`);
         }
     }
-    // Cleanup: remove resolved entries older than 5 minutes
     pending = pending.filter(
         (pv) => pv.status === 'waiting_for_result' || (pv.resolvedAt && now - pv.resolvedAt < 300_000)
     );
 }
 
-/**
- * Get all pending and recent verification entries (for dashboard).
- */
 export function getVerifications(): PendingVerification[] {
     return [...pending];
 }
 
-/**
- * Clear all verification state (on session switch / reset).
- */
 export function clearVerifications(): void {
     pending = [];
     idCounter = 0;
