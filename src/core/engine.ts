@@ -313,6 +313,9 @@ function initializeSource(): void {
             resetSessionSummary(); // Reset idle timer and summary state
             resetSequence();     // Event numbers restart from 1
 
+            // Update state with session ID
+            stateStore.updateState({ sessionId: session.sessionId });
+
             if (isFirstSession) {
                 // First session on startup: suppress alerts (historical data)
                 console.log(`[Lobsterman] Initial session — warming up (suppressing stale alerts)`);
@@ -322,6 +325,12 @@ function initializeSource(): void {
                 // New session detected while running: process live
                 console.log(`[Lobsterman] New session — processing live`);
                 startFileSource(session.sessionFile, true); // no warmup
+            }
+
+            // Always notify about session start (don't rely on handleEvent,
+            // which gets suppressed during warmup)
+            if (callbacks.onSessionStart) {
+                callbacks.onSessionStart(session.sessionId, '(monitoring started)');
             }
         });
     }
