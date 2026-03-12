@@ -146,11 +146,6 @@ function handleEvent(event: NormalizedEvent): void {
     if (event.type === 'user_message' && event.rawSnippet) {
         const taskText = extractTaskText(event.rawSnippet);
         stateStore.updateState({ originalTask: taskText });
-
-        // Fire session start callback on first user message only
-        if (!warmingUp && !preState.originalTask && callbacks.onSessionStart) {
-            callbacks.onSessionStart(preState.sessionId, taskText);
-        }
     }
 
     // 1. Push event to state store (runs state updater internally)
