@@ -16,10 +16,16 @@ import { onEventReceived, resetSessionSummary, updatePeakRisk } from '../telegra
 import { DEMO_TASK, DEMO_CONSTRAINTS } from '../lib/demo-scenario';
 import type { EventSourceAdapter } from './types';
 
+// Use process-level global to survive Next.js hot-module-reload and multi-context
+// initialization in dev mode. Without this, each module re-load gets its own
+// `initialized = false` and spawns a second Telegram bot → 409 Conflict.
+const g = global as typeof global & { __lobstermanInitialized?: boolean };
+
 let initialized = false;
 let currentSource: EventSourceAdapter | null = null;
 let sessionWatcher: SessionWatcher | null = null;
 let warmingUp = false; // Suppress callbacks during initial file load
+
 
 // ─── Alert Aggregation ───
 // Target-aware dedup: same ruleId + target within cooldown → aggregate, not spam.
@@ -342,10 +348,11 @@ export function resetEngine(): void {
 }
 
 export function getEngine() {
-    if (!initialized) {
+    if (!g.__lobstermanInitialized) {
+        g.__lobstermanInitialized = true;
+        initialized = true;
         initializeRules();
         initializeSource();
-        initialized = true;
         console.log('[Lobsterman] Engine initialized');
     }
     return { stateStore, reset: resetEngine, registerCallbacks };
@@ -356,7 +363,7 @@ export function getEngine() {
 // without needing an HTTP request or Next.js instrumentation hook.
 if (process.env.LOBSTERMAN_MODE === 'telegram') {
     setTimeout(() => {
-        if (!initialized) {
+        if (!g.__lobstermanInitialized) {
             console.log('[Lobsterman] Auto-starting engine (telegram mode)...');
             getEngine();
         }
