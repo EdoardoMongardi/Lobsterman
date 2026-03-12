@@ -37,31 +37,26 @@ You'll see a simulated 40-event scenario that demonstrates the full rule pipelin
 
 ## 3. Set Up Telegram Notifications
 
-Lobsterman sends real-time alerts to your Telegram. This requires creating a Telegram bot and finding your chat ID.
+Lobsterman sends real-time alerts to your Telegram via a shared bot. You don't need to create your own bot — just get your personal chat ID.
 
-### Step 3a: Create a Telegram Bot
+### Step 3a: Message the Lobsterman Bot
 
-1. Open Telegram and search for **@BotFather**
-2. Send `/newbot`
-3. Choose a name (e.g., "Lobsterman Alerts")
-4. Choose a username (e.g., `lobsterman_alerts_bot`)
-5. BotFather will reply with your **bot token** — a long string like:
-   ```
-   8759087312:AAGfGSk7K5PnzJobja6QE4zS1VDEPmNDsiY
-   ```
-6. **Save this token** — you'll need it in Step 4.
+1. Open Telegram and search for **@lobsterman_alerts_bot** (or ask the project maintainer for the bot link)
+2. Tap **Start** or send any message (e.g., "hello")
+3. The bot won't reply yet — that's normal. You just need to initiate a chat so Telegram registers your chat ID.
 
 ### Step 3b: Find Your Chat ID
 
-1. Open Telegram and **send any message** to your new bot (e.g., "hello")
-2. Open this URL in your browser (replace `YOUR_BOT_TOKEN`):
+1. Open this URL in your browser (the bot token is shared — ask the project maintainer):
    ```
-   https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates
+   https://api.telegram.org/bot<BOT_TOKEN>/getUpdates
    ```
-3. Look for `"chat":{"id":XXXXXXX}` in the JSON response
-4. **Save this number** — this is your chat ID
+2. Look for your message in the JSON. Find `"chat":{"id":XXXXXXX}` — that number is your **chat ID**
+3. **Save this number** — you'll use it in Step 4
 
 > **Tip**: If you see an empty `"result":[]`, send another message to the bot and refresh the URL.
+>
+> **Privacy note**: Each user gets messages in their own private chat. Other users cannot see your alerts.
 
 ---
 
@@ -72,10 +67,14 @@ Create a `.env.local` file in the Lobsterman project root:
 ```bash
 # Required for Telegram mode
 LOBSTERMAN_MODE=telegram
-TELEGRAM_BOT_TOKEN=your_bot_token_from_step_3a
+
+# Shared bot token — ask the project maintainer for this
+TELEGRAM_BOT_TOKEN=ask_maintainer_for_token
+
+# YOUR personal chat ID from Step 3b
 TELEGRAM_CHAT_ID=your_chat_id_from_step_3b
 
-# Required: path to the project the AI agent is working on
+# Required: path to the project YOUR AI agent is working on
 # Lobsterman will only verify file operations inside this directory
 LOBSTERMAN_PROJECT_ROOT=/Users/yourname/path/to/project
 
