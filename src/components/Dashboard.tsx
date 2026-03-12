@@ -5,6 +5,8 @@ import { InterventionPanel } from './InterventionPanel';
 import { SessionSummary } from './SessionSummary';
 import { Timeline } from './Timeline';
 import { WatchdogState } from './WatchdogState';
+import { VerificationsPanel } from './VerificationsPanel';
+import { DecisionsPanel } from './DecisionsPanel';
 
 export function Dashboard({
     state,
@@ -34,6 +36,8 @@ export function Dashboard({
                     recommendedAction={state.recommendedAction}
                     activeFlags={state.activeRedFlags}
                 />
+                <VerificationsPanel />
+                <DecisionsPanel />
                 <SessionSummary
                     originalTask={state.originalTask}
                     constraints={state.constraints}

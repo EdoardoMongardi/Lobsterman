@@ -34,9 +34,10 @@ export default function Home() {
   const [elapsed, setElapsed] = useState(0);
   const [resetting, setResetting] = useState(false);
 
-  // Use a ref to track the last sequence so the polling callback never goes stale
+  // Use refs to track polling state so callbacks never go stale
   const lastSequenceRef = useRef(0);
   const previousRiskRef = useRef<RiskLevel>('low');
+  const currentSessionRef = useRef<string>('');
 
   const poll = useCallback(async () => {
     try {
@@ -44,6 +45,18 @@ export default function Home() {
       const dashRes = await fetch('/api/dashboard');
       if (dashRes.ok) {
         const data: DashboardResponse = await dashRes.json();
+
+        // Detect session change → reset frontend state
+        if (data.state.sessionId && data.state.sessionId !== currentSessionRef.current) {
+          if (currentSessionRef.current !== '') {
+            // Session actually changed (not first load)
+            lastSequenceRef.current = 0;
+            setEvents([]);
+            previousRiskRef.current = 'low';
+          }
+          currentSessionRef.current = data.state.sessionId;
+        }
+
         setState(data.state);
         setUpdatedAt(data.updatedAt);
         setMode(data.mode);
@@ -128,11 +141,13 @@ export default function Home() {
           <h1 className="text-lg font-bold text-white tracking-tight">
             Lobsterman
           </h1>
-          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${mode === 'file'
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${mode === 'telegram'
               ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-500/30'
-              : 'bg-blue-900/50 text-blue-400 border border-blue-500/30'
+              : mode === 'file'
+                ? 'bg-amber-900/50 text-amber-400 border border-amber-500/30'
+                : 'bg-blue-900/50 text-blue-400 border border-blue-500/30'
             }`}>
-            {mode === 'file' ? 'Live Mode' : 'Demo Mode'}
+            {mode === 'telegram' ? 'Telegram Mode' : mode === 'file' ? 'File Mode' : 'Demo Mode'}
           </span>
         </div>
         <div className="flex items-center gap-4">
@@ -142,8 +157,8 @@ export default function Home() {
           {state && (
             <span
               className={`h-2 w-2 rounded-full ${state.stats.totalEvents > 0
-                  ? 'bg-emerald-400 animate-pulse'
-                  : 'bg-gray-700'
+                ? 'bg-emerald-400 animate-pulse'
+                : 'bg-gray-700'
                 }`}
             />
           )}
