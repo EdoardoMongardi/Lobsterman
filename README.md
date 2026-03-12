@@ -85,6 +85,7 @@ OpenClaw Gateway ─── JSONL ──→ Lobsterman Engine ──→ Telegram 
 - **Dashboard**: Next.js + Tailwind, polls every 2 seconds, risk-first layout
 
 See [docs/architecture.md](./docs/architecture.md) for the full data flow.
+See [docs/setup-guide.md](./docs/setup-guide.md) for detailed installation and configuration instructions.
 
 ## Modes
 
