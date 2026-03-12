@@ -41,7 +41,7 @@ Lobsterman sends real-time alerts to your Telegram via a shared bot. You don't n
 
 ### Step 3a: Message the Lobsterman Bot
 
-1. Open Telegram and search for **@lobsterman_alerts_bot** (or ask the project maintainer for the bot link)
+1. Open Telegram and search for **@lobsterman_watch_bot** (or ask the project maintainer for the bot link)
 2. Tap **Start** or send any message (e.g., "hello")
 3. The bot won't reply yet — that's normal. You just need to initiate a chat so Telegram registers your chat ID.
 
