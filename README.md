@@ -20,19 +20,16 @@ Lobsterman monitors OpenClaw agent sessions in real time via Telegram DM and web
 # Clone and install
 git clone https://github.com/EdoardoMongardi/Lobsterman.git
 cd Lobsterman
-npm install
 
-# Demo mode — see it work immediately
-npm run dev
-# Open http://localhost:3000
+# Interactive setup (creates .env.local for you)
+./setup.sh
 
-# Telegram mode — live monitoring
-export LOBSTERMAN_MODE=telegram
-export TELEGRAM_BOT_TOKEN=your_bot_token
-export TELEGRAM_CHAT_ID=your_chat_id
-export LOBSTERMAN_PROJECT_ROOT=/path/to/monitored/project
+# Start monitoring
 npm run dev
+# Dashboard: http://localhost:3000
 ```
+
+Or configure manually — see [docs/setup-guide.md](./docs/setup-guide.md).
 
 ## What It Detects
 
