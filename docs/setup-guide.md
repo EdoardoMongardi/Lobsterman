@@ -16,6 +16,21 @@ Complete instructions for installing and running Lobsterman from scratch.
 ```bash
 git clone https://github.com/EdoardoMongardi/Lobsterman.git
 cd Lobsterman
+```
+
+### Quick Setup (recommended)
+
+Run the interactive setup script — it handles everything:
+
+```bash
+./setup.sh
+```
+
+It will install dependencies, prompt for your Telegram chat ID and project root, and create `.env.local` for you. Then just run `npm run dev`.
+
+If you prefer to configure manually, continue with the steps below.
+
+```bash
 npm install
 ```
 
@@ -106,20 +121,30 @@ Open **http://localhost:3000** — you'll see the live dashboard with "Telegram 
 
 ## 6. Start an OpenClaw Session
 
-In a separate terminal:
+Lobsterman works regardless of how you interact with OpenClaw — **TUI, Telegram, Discord, or any other channel**. It monitors the session files that OpenClaw writes, not the messages.
+
+### If using OpenClaw TUI
+
+In separate terminals:
 
 ```bash
 openclaw gateway   # Terminal 1
 openclaw           # Terminal 2 (TUI)
 ```
 
+### If using OpenClaw via Telegram
+
+Just message your OpenClaw bot as normal. Lobsterman monitors the session files (`~/.openclaw/agents/main/sessions/`), not Telegram — so it works exactly the same way.
+
+> **Note**: The Lobsterman bot (`@lobsterman_watch_bot`) and your OpenClaw bot are completely separate. They don't interfere with each other.
+
 When the agent starts a new session, Lobsterman will:
 - Detect it automatically
-- Send a **🦞 New Session Detected** message to your Telegram
+- Send a **🦞 New Session Detected** message to your Telegram (via the Lobsterman bot)
 
 ### Starting a New Session
 
-If OpenClaw TUI resumes a previous conversation, type `/new` in the TUI to start a fresh session.
+If OpenClaw resumes a previous conversation, type `/new` in the TUI (or start a new Telegram thread with your OpenClaw bot) to start a fresh session.
 
 ---
 
