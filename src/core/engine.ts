@@ -318,6 +318,7 @@ function initializeSource(): void {
 
             if (isFirstSession) {
                 // First session on startup: suppress alerts (historical data)
+                // Don't send "New Session" notification — this is just Lobsterman starting up
                 console.log(`[Lobsterman] Initial session — warming up (suppressing stale alerts)`);
                 startFileSource(session.sessionFile, false); // warmup = true internally
                 isFirstSession = false;
@@ -325,12 +326,11 @@ function initializeSource(): void {
                 // New session detected while running: process live
                 console.log(`[Lobsterman] New session — processing live`);
                 startFileSource(session.sessionFile, true); // no warmup
-            }
 
-            // Always notify about session start (don't rely on handleEvent,
-            // which gets suppressed during warmup)
-            if (callbacks.onSessionStart) {
-                callbacks.onSessionStart(session.sessionId, '(monitoring started)');
+                // Notify operator about genuinely new session
+                if (callbacks.onSessionStart) {
+                    callbacks.onSessionStart(session.sessionId, '(new session detected)');
+                }
             }
         });
     }
