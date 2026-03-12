@@ -1,3 +1,5 @@
+import * as path from 'path';
+import * as os from 'os';
 import { Rule, NormalizedEvent, SupervisorState, RedFlag } from '../core/types';
 import { extractFileOpFromCommand } from '../core/exec-path-extractor';
 
@@ -66,6 +68,18 @@ export const riskyActionRules: Rule[] = [
             }
 
             if (!resolvedPath) return null;
+
+            // Whitelist: OpenClaw's own workspace, node_modules, and common system paths
+            // These are normal bootstrapping reads, not risky agent behavior.
+            const WHITELISTED_PREFIXES = [
+                path.join(os.homedir(), '.openclaw'),
+                path.join(os.homedir(), '.nvm'),
+                '/usr/local/',
+                '/opt/',
+            ];
+            if (WHITELISTED_PREFIXES.some(prefix => resolvedPath!.startsWith(prefix))) {
+                return null;
+            }
 
             // Only fire if path is outside project root
             if (resolvedPath.startsWith(PROJECT_ROOT)) return null;
