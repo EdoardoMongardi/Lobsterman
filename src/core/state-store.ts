@@ -110,5 +110,12 @@ class StateStore {
     }
 }
 
-// Singleton
-export const stateStore = new StateStore();
+// Process-global singleton — survives Next.js dev mode module reloads.
+// Without this, API routes load a separate module context with an empty stateStore.
+const g = global as typeof global & { __lobstermanStateStore?: StateStore };
+
+if (!g.__lobstermanStateStore) {
+    g.__lobstermanStateStore = new StateStore();
+}
+
+export const stateStore: StateStore = g.__lobstermanStateStore;
