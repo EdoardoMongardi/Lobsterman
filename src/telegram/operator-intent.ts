@@ -16,8 +16,16 @@ import { stateStore } from '../core/state-store';
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DECISIONS_FILE = path.join(DATA_DIR, 'decisions.jsonl');
 
-let decisions: OperatorDecision[] = [];
-let idCounter = 0;
+// Process-global state — survives Next.js module reloads
+const g = global as typeof global & {
+    __lobstermanDecisions?: OperatorDecision[];
+    __lobstermanDecisionIdCounter?: number;
+};
+if (!g.__lobstermanDecisions) g.__lobstermanDecisions = [];
+if (g.__lobstermanDecisionIdCounter === undefined) g.__lobstermanDecisionIdCounter = 0;
+
+const getDecisionsArr = () => g.__lobstermanDecisions!;
+const setDecisionsArr = (v: OperatorDecision[]) => { g.__lobstermanDecisions = v; };
 
 /**
  * Load persisted decisions from disk on startup.
@@ -28,19 +36,19 @@ export function loadDecisions(): void {
     try {
         const raw = fs.readFileSync(DECISIONS_FILE, 'utf-8');
         const lines = raw.split('\n').filter((l) => l.trim());
-        decisions = [];
+        setDecisionsArr([]);
         for (const line of lines) {
             try {
                 const d = JSON.parse(line) as OperatorDecision;
-                decisions.push(d);
-                idCounter++;
+                getDecisionsArr().push(d);
+                g.__lobstermanDecisionIdCounter!++;
             } catch {
                 // Skip malformed lines
             }
         }
         // Sync loaded decisions into supervisor state
-        stateStore.updateState({ operatorDecisions: [...decisions] });
-        console.log(`[Lobsterman] Loaded ${decisions.length} operator decisions from disk`);
+        stateStore.updateState({ operatorDecisions: [...getDecisionsArr()] });
+        console.log(`[Lobsterman] Loaded ${getDecisionsArr().length} operator decisions from disk`);
     } catch (err) {
         console.warn('[Lobsterman] Failed to load decisions file:', err);
     }
@@ -60,14 +68,14 @@ export function recordDecision(
     userId?: string,
 ): OperatorDecision {
     const entry: OperatorDecision = {
-        id: `op-${Date.now()}-${++idCounter}`,
+        id: `op-${Date.now()}-${++g.__lobstermanDecisionIdCounter!}`,
         timestamp: Date.now(),
         decision,
         ruleId,
         flagId,
         userId,
     };
-    decisions.push(entry);
+    getDecisionsArr().push(entry);
 
     // Persist to disk (append)
     try {
@@ -80,7 +88,7 @@ export function recordDecision(
     }
 
     // Update supervisor state so dashboard reflects decisions
-    stateStore.updateState({ operatorDecisions: [...decisions] });
+    stateStore.updateState({ operatorDecisions: [...getDecisionsArr()] });
 
     console.log(`[Lobsterman] Operator decision: ${decision}${ruleId ? ` (rule: ${ruleId})` : ''}`);
     return entry;
@@ -90,14 +98,14 @@ export function recordDecision(
  * Get all recorded operator decisions.
  */
 export function getDecisions(): OperatorDecision[] {
-    return [...decisions];
+    return [...getDecisionsArr()];
 }
 
 /**
  * Get recent decisions (last N).
  */
 export function getRecentDecisions(count: number = 10): OperatorDecision[] {
-    return decisions.slice(-count);
+    return getDecisionsArr().slice(-count);
 }
 
 /**
@@ -105,8 +113,8 @@ export function getRecentDecisions(count: number = 10): OperatorDecision[] {
  * Also deletes the persisted file.
  */
 export function clearDecisions(): void {
-    decisions = [];
-    idCounter = 0;
+    setDecisionsArr([]);
+    g.__lobstermanDecisionIdCounter = 0;
     try {
         if (fs.existsSync(DECISIONS_FILE)) {
             fs.unlinkSync(DECISIONS_FILE);

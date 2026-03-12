@@ -82,12 +82,23 @@ function detectVerificationType(event: NormalizedEvent): { type: VerificationTyp
 
 // ─── Verifier Engine ───
 
-let pending: PendingVerification[] = [];
-let callback: OnVerificationResult | null = null;
-let idCounter = 0;
+// Process-global state — survives Next.js module reloads
+const g = global as typeof global & {
+    __lobstermanPendingVerifications?: PendingVerification[];
+    __lobstermanVerificationCallback?: OnVerificationResult | null;
+    __lobstermanVerificationIdCounter?: number;
+};
+if (!g.__lobstermanPendingVerifications) g.__lobstermanPendingVerifications = [];
+if (g.__lobstermanVerificationCallback === undefined) g.__lobstermanVerificationCallback = null;
+if (g.__lobstermanVerificationIdCounter === undefined) g.__lobstermanVerificationIdCounter = 0;
+
+const getPending = () => g.__lobstermanPendingVerifications!;
+const setPending = (v: PendingVerification[]) => { g.__lobstermanPendingVerifications = v; };
+const getCallback = () => g.__lobstermanVerificationCallback!;
+const nextId = () => ++g.__lobstermanVerificationIdCounter!;
 
 export function registerVerificationCallback(cb: OnVerificationResult): void {
-    callback = cb;
+    g.__lobstermanVerificationCallback = cb;
 }
 
 export function processVerification(event: NormalizedEvent): void {
@@ -95,14 +106,14 @@ export function processVerification(event: NormalizedEvent): void {
     const detection = detectVerificationType(event);
     if (detection) {
         const pv: PendingVerification = {
-            id: `pv-${Date.now()}-${++idCounter}`,
+            id: `pv-${Date.now()}-${nextId()}`,
             type: detection.type,
             targetPath: detection.path,
             toolName: event.tool ?? 'unknown',
             status: 'waiting_for_result',
             createdAt: Date.now(),
         };
-        pending.push(pv);
+        getPending().push(pv);
         console.log(`[Verifier] Queued ${pv.type} for: ${pv.targetPath}`);
     }
 
@@ -128,7 +139,7 @@ export function processVerification(event: NormalizedEvent): void {
 }
 
 function findMatchingPending(toolName: string): PendingVerification | null {
-    for (const pv of pending) {
+    for (const pv of getPending()) {
         if (pv.status !== 'waiting_for_result') continue;
         if (isToolMatch(pv.toolName, toolName)) return pv;
     }
@@ -163,28 +174,29 @@ function runVerification(pv: PendingVerification): void {
 
     console.log(`[Verifier] ${result.status}: ${result.detail}`);
 
-    if (callback) callback(result);
+    const cb = getCallback();
+    if (cb) cb(result);
 }
 
 function expireStale(): void {
     const now = Date.now();
-    for (const pv of pending) {
+    for (const pv of getPending()) {
         if (pv.status === 'waiting_for_result' && now - pv.createdAt > EXPIRATION_MS) {
             pv.status = 'expired';
             pv.resolvedAt = now;
             console.log(`[Verifier] Expired: ${pv.type} for ${pv.targetPath}`);
         }
     }
-    pending = pending.filter(
-        (pv) => pv.status === 'waiting_for_result' || (pv.resolvedAt && now - pv.resolvedAt < 300_000)
-    );
+    setPending(getPending().filter(
+        (pv: PendingVerification) => pv.status === 'waiting_for_result' || (pv.resolvedAt && now - pv.resolvedAt < 300_000)
+    ));
 }
 
 export function getVerifications(): PendingVerification[] {
-    return [...pending];
+    return [...getPending()];
 }
 
 export function clearVerifications(): void {
-    pending = [];
-    idCounter = 0;
+    setPending([]);
+    g.__lobstermanVerificationIdCounter = 0;
 }
